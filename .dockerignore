@@ -1,0 +1,13 @@
+# Keep the build context (and any cached context layer) minimal.
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.pyo
+tests/
+openspec/
+Dockerfile
+.dockerignore
+README.md
+requirements-dev.txt
+*.log

@@ -1,0 +1,11 @@
+# Machine-local config (compose PORT override; see README)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Logs
+*.log

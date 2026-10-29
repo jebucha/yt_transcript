@@ -1,0 +1,36 @@
+# yt-transcript — single service, plain compose v2.
+# No `version:` key (obsolete in v2), no profiles, no build args: the file
+# stays inside the key set that both `docker compose` and `podman compose`
+# / podman-compose support (see design.md, decision 4).
+
+services:
+  app:
+    build: .
+    image: yt-transcript
+    container_name: yt-transcript
+    restart: unless-stopped
+    ports:
+      # Host port is overridable via an uncommitted .env file (e.g. PORT=9000);
+      # the container always binds 8000. Host and container ports are
+      # deliberately decoupled (design.md, decision 1).
+      - "${PORT:-8000}:8000"
+    healthcheck:
+      # Probes the UI route with python — the python:3.13-slim image has no
+      # curl, and no dedicated /health endpoint is added (design.md,
+      # decision 2). urlopen raises on any 4xx/5xx, so a degraded app
+      # fails the probe.
+      # The hardcoded 127.0.0.1:8000 is correct precisely because of the
+      # port decoupling above: the container always listens on 8000, so the
+      # probe does not need to track ${PORT}. If the container-side port in
+      # the mapping above is ever changed or re-coupled, update this address
+      # to match.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YouTube Transcript</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>YouTube Transcript</h1>
+    <p class="subtitle">Paste a YouTube video URL to get its caption transcript.</p>
+
+    <form id="fetch-form" class="row">
+      <input
+        id="url-input"
+        class="url-input"
+        type="text"
+        inputmode="url"
+        placeholder="https://www.youtube.com/watch?v=…"
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="YouTube video URL"
+      />
+      <button id="fetch-btn" class="btn" type="submit">
+        <span id="fetch-spinner" class="spinner" hidden aria-hidden="true"></span>
+        <span id="fetch-label">Fetch transcript</span>
+      </button>
+    </form>
+
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+    <section id="result" hidden>
+      <div class="result-header">
+        <div class="result-meta">
+          <h2 id="video-title" class="video-title"></h2>
+          <span id="video-language" class="video-language"></span>
+        </div>
+        <button id="copy-btn" class="btn" disabled>Copy transcript</button>
+      </div>
+      <pre id="transcript-panel" class="transcript-panel" tabindex="0"></pre>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
