@@ -1,5 +1,7 @@
 # Machine-local config (compose PORT override; see README)
 .env
+.claude/
+.opencode/
 
 # Python
 __pycache__/
