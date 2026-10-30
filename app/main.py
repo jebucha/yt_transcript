@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from app import chain as chain_mod
 from app import log as applog
 from app.errors import TranscriptError
 from app.log import get_logger
+from app.persist import save_transcript
 
 STATIC_DIR = Path(__file__).parent / "static"
 DEFAULT_PORT = 8000
@@ -86,6 +88,12 @@ def create_app() -> FastAPI:
                 status_code=exc.status,
                 content={"error": {"code": exc.code, "message": exc.message}},
             )
+        # Best-effort persistence after a successful fetch: runs in a worker
+        # thread (blocking I/O off the event loop) and never affects the
+        # response (design decisions 1, 4 and 5).
+        await asyncio.to_thread(
+            save_transcript, result.text, result.title, result.video_id
+        )
         return {
             "text": result.text,
             "video_id": result.video_id,

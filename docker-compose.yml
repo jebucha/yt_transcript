@@ -14,6 +14,14 @@ services:
       # the container always binds 8000. Host and container ports are
       # deliberately decoupled (design.md, decision 1).
       - "${PORT:-8000}:8000"
+    volumes:
+      # One plain-text file per fetched transcript is written to /transcripts
+      # inside the container (design.md, decision 6). The host directory is
+      # overridable via an uncommitted .env file (e.g. TRANSCRIPTS_DIR=...);
+      # the container-side path is fixed at /transcripts. The app never creates
+      # the directory; a missing host directory degrades to a logged
+      # best-effort failure.
+      - "${TRANSCRIPTS_DIR:-/home/john/transcripts}:/transcripts"
     healthcheck:
       # Probes the UI route with python — the astral/uv base image has no
       # curl, and no dedicated /health endpoint is added (design.md,

@@ -2,8 +2,9 @@
 
 A small, self-hosted tool that turns a pasted YouTube URL into a plain-text
 transcript with a single "copy to clipboard" action. One lightweight
-container, zero state, no database. Copy works over plain HTTP as well as
-HTTPS/localhost.
+container, no database. The only state is one plain-text `.txt` file per
+fetched transcript, written to a bind-mounted directory. Copy works over
+plain HTTP as well as HTTPS/localhost.
 
 This project started as a random idea: a simple way to generate YouTube
 transcripts locally, on your own machine or server, without relying on a
@@ -30,15 +31,34 @@ docker compose up -d --build
 
 `docker-compose.yml` declares everything: the image build, the fixed
 container name (`yt-transcript`), the `unless-stopped` restart policy, the
-port mapping, a healthcheck, and container log rotation. After startup the
-container reports healthy via `docker compose ps`; inspect output with
-`docker logs yt-transcript`.
+port mapping, a bind mount for transcript storage, a healthcheck, and
+container log rotation. After startup the container reports healthy via
+`docker compose ps`; inspect output with `docker logs yt-transcript`.
 
 **Optional host-port override.** Drop an uncommitted `.env` file (git-
 ignored) next to the compose file containing e.g. `PORT=9000`, then re-run
 `docker compose up -d`. Only the published host port changes — the
 container still listens on 8000 internally — so open
 `http://<server-ip>:9000` instead.
+
+**Transcript storage.** Every successful fetch is also written to a
+plain-text `.txt` file (named after the video title) in the host directory
+bound to `/transcripts` inside the container — by default
+`/home/john/transcripts`. Override the host location with an uncommitted
+`.env` file (git-ignored) next to the compose file containing e.g.
+`TRANSCRIPTS_DIR=/var/lib/yt-transcripts`, then re-run
+`docker compose up -d`. The container-side path is fixed at `/transcripts`
+(set by the image's `TRANSCRIPT_DIR` default). Persistence is best-effort:
+if the host directory is missing or unwritable, the transcript is still
+returned and the failure is only logged as `transcript_save_failed`; the app
+never creates the directory itself.
+
+**Host-directory permissions (native Linux).** The container runs as the
+unprivileged `appuser`, so the host directory must be writable by that user.
+If saves log `transcript_save_failed` with a permission error, align the host
+directory's ownership/permissions with `appuser`'s uid (e.g. `chown` /
+`chmod` on `/home/john/transcripts`). Docker Desktop's bind mounts are
+permissive, so this only matters on a native Linux server.
 
 ### Without compose
 
@@ -88,6 +108,10 @@ curl -s -X POST http://127.0.0.1:8000/api/transcript \
 
 # 4) The structured logs
 docker logs yt-transcript        # or: podman logs yt-transcript
+#    -> a "transcript_saved" event with the file path and byte count
+
+# 5) The transcript file is persisted (compose only)
+ls -l /home/john/transcripts/    # -> one .txt file named after the video title
 ```
 
 Stop when done: `docker compose down` (or `podman compose down`) — removes

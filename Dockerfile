@@ -5,7 +5,8 @@ FROM astral/uv:python3.13-bookworm-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000 \
-    HOST=0.0.0.0
+    HOST=0.0.0.0 \
+    TRANSCRIPT_DIR=/transcripts
 
 WORKDIR /app
 
