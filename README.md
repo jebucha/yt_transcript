@@ -118,6 +118,7 @@ Then:
 ## Development
 
 ```sh
+# requires uv (>= 0.13) — see https://docs.astral.sh/uv/getting-started/installation/
 uv sync                                          # creates the local environment from pyproject.toml + uv.lock
 
 # unit + API + logging tests (all upstream traffic mocked)
