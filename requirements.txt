@@ -1,7 +1,0 @@
-# Pinned runtime dependencies (Python 3.13)
-fastapi==0.162.0
-uvicorn==0.54.0
-structlog==26.1.0
-youtube-transcript-api==1.2.4
-yt-dlp==2026.10.26
-requests==2.34.2  # imported directly by app/fetchers.py (also a yt-dlp dependency)

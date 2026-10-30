@@ -15,7 +15,7 @@ services:
       # deliberately decoupled (design.md, decision 1).
       - "${PORT:-8000}:8000"
     healthcheck:
-      # Probes the UI route with python — the python:3.13-slim image has no
+      # Probes the UI route with python — the astral/uv base image has no
       # curl, and no dedicated /health endpoint is added (design.md,
       # decision 2). urlopen raises on any 4xx/5xx, so a degraded app
       # fails the probe.

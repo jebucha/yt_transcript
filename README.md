@@ -100,15 +100,14 @@ pages the libraries need updating. Symptoms: `UPSTREAM_FAILURE` errors even
 for videos that clearly have captions.
 
 ```sh
-python3.13 -m venv .venv
-.venv/bin/pip install -U youtube-transcript-api yt-dlp
-# re-pin the new versions into requirements.txt (keep the pins exact)
-.venv/bin/python -m pip freeze | grep -iE '^(youtube-transcript-api|yt-dlp)=='
+# pin the new versions exactly (look them up in the libraries' changelogs)
+uv add 'youtube-transcript-api==<new-version>' 'yt-dlp==<new-version>'
 ```
 
 Then:
 
-1. Update `requirements.txt` with the two new pins.
+1. Commit the refreshed `pyproject.toml` and `uv.lock` (both are rewritten in
+   one step — the diff is the reviewable change, and the pins stay exact).
 2. Rebuild and re-run:
    `docker build -t yt-transcript .` followed by
    `docker rm -f yt-transcript && docker run -d --name yt-transcript --restart unless-stopped -p 8000:8000 yt-transcript`
@@ -119,18 +118,17 @@ Then:
 ## Development
 
 ```sh
-python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+uv sync                                          # creates the local environment from pyproject.toml + uv.lock
 
 # unit + API + logging tests (all upstream traffic mocked)
-.venv/bin/python -m pytest tests/ -q --ignore=tests/e2e
+uv run python -m pytest tests/ -q --ignore=tests/e2e
 
 # e2e UI tests (headless Chromium; upstream fetch stubbed)
-.venv/bin/python -m playwright install chromium   # one-time
-.venv/bin/python -m pytest tests/e2e/ -q
+uv run python -m playwright install chromium   # one-time
+uv run python -m pytest tests/e2e/ -q
 
 # run locally without a container
-.venv/bin/python -m app.main                      # http://localhost:8000
+uv run python -m app.main                      # http://localhost:8000
 ```
 
 ## Layout

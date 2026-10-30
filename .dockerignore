@@ -9,5 +9,4 @@ openspec/
 Dockerfile
 .dockerignore
 README.md
-requirements-dev.txt
 *.log
