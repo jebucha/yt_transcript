@@ -16,6 +16,11 @@ from pydantic import BaseModel
 from app import chain as chain_mod
 from app import log as applog
 from app.errors import TranscriptError
+from app.library import (
+    is_structurally_invalid_name,
+    list_transcripts,
+    read_transcript,
+)
 from app.log import get_logger
 from app.persist import save_transcript
 
@@ -101,6 +106,34 @@ def create_app() -> FastAPI:
             "language": result.language,
             "source": result.source,
         }
+
+    @app.get("/api/transcripts")
+    async def list_transcripts_endpoint():
+        # Read-only, best-effort: an unusable directory degrades to an empty
+        # list (never an error). Blocking I/O runs off the event loop, as with
+        # save_transcript; the endpoint never touches the fetch chain or the
+        # single-flight semaphore (design decisions 1, 4 and 5).
+        transcripts = await asyncio.to_thread(list_transcripts)
+        return {"transcripts": transcripts}
+
+    @app.get("/api/transcripts/{name}")
+    async def read_transcript_endpoint(name: str):
+        # Structural reject is the hard 400 rule (design decision 3, step 1),
+        # applied before any filesystem access; a plain miss is a 404.
+        if is_structurally_invalid_name(name):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": "INVALID_NAME",
+                                   "message": "Invalid transcript name."}},
+            )
+        ok, text = await asyncio.to_thread(read_transcript, name)
+        if not ok:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "NOT_FOUND",
+                                   "message": "This transcript is no longer available."}},
+            )
+        return {"name": name, "text": text}
 
     # Mounted last so the API routes above take precedence.
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

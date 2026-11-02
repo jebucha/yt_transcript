@@ -8,11 +8,15 @@ Run:  python -m pytest tests/e2e/ -q
 """
 
 import asyncio
+import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import time
+from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from playwright.sync_api import sync_playwright
@@ -461,3 +465,292 @@ def test_busy_error_shown(page, server):
     assert "busy" in message.lower()
     assert "try again" in message.lower()
     assert not page.locator("#fetch-btn").is_disabled()
+
+    # Drain the still-in-flight first fetch so the single-flight semaphore is
+    # released before any later test issues a fetch (no cross-test BUSY).
+    _wait_result(page)
+
+
+# --- T-TRANSCRIPT-LIBRARY-016 .. 027 ------------------------------------------
+# The saved-transcript list UI. The running server reads TRANSCRIPT_DIR at call
+# time, so a fresh per-test directory wired via the env var is enough; seeding
+# files and reloading the page makes them visible to the list.
+
+SAVED_MTIME_OLD = 1_760_000_000
+SAVED_MTIME_NEW = SAVED_MTIME_OLD + 3600
+
+
+@pytest.fixture()
+def saved_env():
+    """A fresh per-test transcript directory wired to the running server via
+    TRANSCRIPT_DIR (the app reads the variable at call time)."""
+    tmp = tempfile.TemporaryDirectory()
+    os.environ["TRANSCRIPT_DIR"] = tmp.name
+    yield Path(tmp.name)
+    os.environ.pop("TRANSCRIPT_DIR", None)
+    tmp.cleanup()
+
+
+def _seed(directory, name, content, mtime):
+    """Write a saved transcript and pin its mtime (no clock-granularity flakes)."""
+    path = directory / name
+    path.write_text(content, encoding="utf-8")
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def _wait_saved_rows(page, count):
+    page.wait_for_function(
+        "n => document.querySelectorAll('#saved-list .saved-row').length === n",
+        arg=count,
+        timeout=10_000,
+    )
+
+
+def test_saved_list_shows_transcripts(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-016"""
+    _seed(saved_env, "the_end_of_llms_ncm.txt", "Hello there.\n", SAVED_MTIME_NEW)
+    _seed(saved_env, "another_video.txt", "Another transcript.\n", SAVED_MTIME_OLD)
+    page.reload()
+
+    _wait_saved_rows(page, 2)
+    rows = page.locator("#saved-list .saved-row")
+    # most recent first, each row carries the real file name
+    assert rows.nth(0).get_attribute("data-name") == "the_end_of_llms_ncm.txt"
+    assert rows.nth(1).get_attribute("data-name") == "another_video.txt"
+    assert page.locator("#saved-count").inner_text() == "2"
+    assert page.locator("#saved-empty").is_hidden()
+    # inside a bounded, scrollable area
+    list_box = page.locator("#saved-list")
+    assert list_box.evaluate("el => getComputedStyle(el).overflowY") in ("auto", "scroll")
+    assert list_box.evaluate("el => getComputedStyle(el).maxHeight") != "none"
+
+
+def test_saved_list_empty_state(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-018"""
+    page.reload()  # fresh empty directory
+
+    page.wait_for_selector("#saved-empty:not([hidden])", timeout=10_000)
+    assert page.locator("#saved-list").is_hidden()
+    assert page.locator("#saved-list .saved-row").count() == 0
+    assert page.locator("#saved-count").inner_text() == ""
+
+
+def test_saved_list_scrolls(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-019"""
+    for i in range(60):
+        _seed(saved_env, f"transcript_{i:03d}.txt", f"line {i}\n", SAVED_MTIME_OLD + i)
+    page.reload()
+
+    _wait_saved_rows(page, 60)
+    box = page.locator("#saved-list")
+    scroll_height = box.evaluate("el => el.scrollHeight")
+    client_height = box.evaluate("el => el.clientHeight")
+    assert scroll_height > client_height, "list should be taller than its viewport"
+    box.evaluate("el => { el.scrollTop = 500; }")
+    assert box.evaluate("el => el.scrollTop") > 0
+    # the section stays bounded, so the page layout does not break
+    assert box.evaluate("el => getComputedStyle(el).maxHeight") != "none"
+    assert page.evaluate("() => document.body.scrollHeight") < 3 * 640
+
+
+def test_saved_list_prettified_display_name(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-017"""
+    _seed(saved_env, "the_end_of_llms_ncm.txt", "Hello there.\n", SAVED_MTIME_NEW)
+    page.reload()
+    page.wait_for_selector("#saved-list .saved-row", timeout=10_000)
+
+    row = page.locator("#saved-list .saved-row")
+    # display: underscores replaced with spaces, .txt extension stripped,
+    # words capitalized (CSS text-transform); the row itself carries the
+    # real file name
+    label = row.locator(".saved-name").inner_text()
+    assert "_" not in label
+    assert label.lower() == "the end of llms ncm"
+    assert row.locator(".saved-name").evaluate(
+        "el => getComputedStyle(el).textTransform"
+    ) == "capitalize"
+    assert row.get_attribute("data-name") == "the_end_of_llms_ncm.txt"
+
+    # any request triggered by the row targets the real file name
+    request_paths = []
+    page.on(
+        "request",
+        lambda r: request_paths.append(urlparse(r.url).path),
+    )
+    row.click()
+    page.wait_for_selector("#result:not([hidden])", timeout=10_000)
+    assert "/api/transcripts/the_end_of_llms_ncm.txt" in request_paths
+
+
+def test_saved_list_updates_after_fetch(page, server, saved_env):
+    """T-TRANSCRIPT-LIBRARY-020"""
+    server["stub"].set_success()
+    page.reload()
+    page.wait_for_function(
+        "() => document.querySelectorAll('#saved-list .saved-row').length === 0"
+    )
+
+    # a successful fetch persists test_video_title.txt and reloads the list
+    _fetch(page, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    _wait_result(page)
+
+    page.wait_for_selector(
+        "#saved-list .saved-row[data-name='test_video_title.txt']", timeout=10_000
+    )
+    assert page.locator("#saved-list .saved-row").count() == 1
+
+
+def test_saved_list_manual_refresh(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-026"""
+    page.reload()
+    page.wait_for_function(
+        "() => document.querySelectorAll('#saved-list .saved-row').length === 0"
+    )
+
+    # a new file appears without a fetch; only the refresh affordance notices
+    _seed(saved_env, "brand_new_video.txt", "Fresh text.\n", SAVED_MTIME_NEW)
+    assert page.locator("#saved-list .saved-row").count() == 0
+
+    page.click("#saved-refresh-btn")
+    page.wait_for_selector(
+        "#saved-list .saved-row[data-name='brand_new_video.txt']", timeout=10_000
+    )
+    assert page.locator("#saved-list .saved-row").count() == 1
+
+
+def test_saved_list_does_not_poll(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-027"""
+    list_requests = []
+
+    def on_request(request):
+        if urlparse(request.url).path == "/api/transcripts":
+            list_requests.append(request.url)
+
+    page.on("request", on_request)
+    page.reload()
+    page.wait_for_function(
+        "() => document.querySelectorAll('#saved-list .saved-row').length === 0"
+    )
+
+    # exactly one list request on load, and none after it
+    assert len(list_requests) == 1
+    page.wait_for_timeout(1500)
+    assert len(list_requests) == 1
+
+
+def test_click_saved_transcript_displays_it(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-021"""
+    _seed(saved_env, "the_end_of_llms_ncm.txt", "Hello there.\n", SAVED_MTIME_NEW)
+    page.reload()
+    page.wait_for_selector("#saved-list .saved-row", timeout=10_000)
+
+    page.click("#saved-list .saved-row")
+    _wait_result(page)
+
+    assert page.locator("#transcript-panel").inner_text() == "Hello there.\n"
+    # the transcript's name is shown as the title
+    assert page.locator("#video-title").inner_text() == "the_end_of_llms_ncm.txt"
+    assert not page.locator("#copy-btn").is_disabled()
+    # the language line is hidden for a saved transcript
+    assert page.locator("#video-language").inner_text() == ""
+
+
+def test_saved_transcript_html_shown_as_text(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-022"""
+    markup = "<script>window.__transcript_pwned = true;</script>hello world"
+    _seed(saved_env, "tricky_video.txt", markup + "\n", SAVED_MTIME_NEW)
+    page.reload()
+    page.wait_for_selector("#saved-list .saved-row", timeout=10_000)
+
+    page.click("#saved-list .saved-row")
+    _wait_result(page)
+
+    # the markup is displayed as plain text...
+    assert "<script>" in page.locator("#transcript-panel").inner_text()
+    # ...not rendered or executed
+    assert page.locator("#transcript-panel script").count() == 0
+    assert page.evaluate("() => window.__transcript_pwned") is None
+
+
+def test_click_deleted_saved_transcript_shows_error(page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-023"""
+    path = _seed(saved_env, "gone_video.txt", "Gone.\n", SAVED_MTIME_NEW)
+    page.reload()
+    page.wait_for_selector(
+        "#saved-list .saved-row[data-name='gone_video.txt']", timeout=10_000
+    )
+
+    # the file disappears after the list was loaded
+    path.unlink()
+    page.click("#saved-list .saved-row")
+    _wait_error(page)
+
+    assert page.locator("#error-banner").inner_text()
+    # the page remains usable
+    assert not page.locator("#url-input").is_disabled()
+    assert not page.locator("#fetch-btn").is_disabled()
+
+
+def test_download_saved_transcript_downloads_file(page, server, saved_env):
+    """T-TRANSCRIPT-LIBRARY-024"""
+    content = "Hello there.\n"
+    _seed(saved_env, "the_end_of_llms_ncm.txt", content, SAVED_MTIME_NEW)
+    page.reload()
+    page.wait_for_selector("#saved-list .saved-row", timeout=10_000)
+
+    # A freshly fetched transcript has no download name: button stays disabled
+    server["stub"].set_success()
+    _fetch(page, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    _wait_result(page)
+    assert page.locator("#download-btn").is_disabled()
+
+    # A saved transcript does: clicking its row enables the download
+    page.click("#saved-list .saved-row[data-name='the_end_of_llms_ncm.txt']")
+    page.wait_for_function(
+        "() => document.getElementById('video-title').textContent === 'the_end_of_llms_ncm.txt'",
+        timeout=10_000,
+    )
+    assert not page.locator("#download-btn").is_disabled()
+
+    with page.expect_download() as download_info:
+        page.click("#download-btn")
+    download = download_info.value
+    assert download.suggested_filename == "the_end_of_llms_ncm.txt"
+
+    target = Path(tempfile.mkstemp(suffix=".txt")[1])
+    try:
+        download.save_as(str(target))
+        # the downloaded bytes equal the seeded file's content
+        assert target.read_bytes() == content.encode("utf-8")
+    finally:
+        target.unlink()
+
+
+def test_download_over_plain_http(http_page, saved_env):
+    """T-TRANSCRIPT-LIBRARY-025"""
+    # a true non-secure context: the Blob download must not depend on HTTPS
+    assert http_page.evaluate("window.isSecureContext") is False
+    content = "Hello there.\n"
+    _seed(saved_env, "the_end_of_llms_ncm.txt", content, SAVED_MTIME_NEW)
+    http_page.reload()
+    http_page.wait_for_selector("#saved-list .saved-row", timeout=10_000)
+
+    http_page.click("#saved-list .saved-row")
+    http_page.wait_for_function(
+        "() => document.getElementById('video-title').textContent === 'the_end_of_llms_ncm.txt'",
+        timeout=10_000,
+    )
+    assert not http_page.locator("#download-btn").is_disabled()
+
+    with http_page.expect_download() as download_info:
+        http_page.click("#download-btn")
+    download = download_info.value
+    assert download.suggested_filename == "the_end_of_llms_ncm.txt"
+
+    target = Path(tempfile.mkstemp(suffix=".txt")[1])
+    try:
+        download.save_as(str(target))
+        assert target.read_bytes() == content.encode("utf-8")
+    finally:
+        target.unlink()

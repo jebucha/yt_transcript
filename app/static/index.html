@@ -36,9 +36,25 @@
           <h2 id="video-title" class="video-title"></h2>
           <span id="video-language" class="video-language"></span>
         </div>
-        <button id="copy-btn" class="btn" disabled>Copy transcript</button>
+        <div class="result-actions">
+          <button id="copy-btn" class="btn" disabled>Copy transcript</button>
+          <button id="download-btn" class="btn" disabled>Download</button>
+        </div>
       </div>
       <pre id="transcript-panel" class="transcript-panel" tabindex="0"></pre>
+    </section>
+
+    <section id="saved" class="saved-section" aria-labelledby="saved-title">
+      <div class="saved-header">
+        <h2 id="saved-title" class="saved-title">
+          Saved transcripts <span id="saved-count" class="saved-count"></span>
+        </h2>
+        <button id="saved-refresh-btn" class="btn btn-quiet" type="button">
+          Refresh
+        </button>
+      </div>
+      <ul id="saved-list" class="saved-list" hidden></ul>
+      <p id="saved-empty" class="saved-empty" hidden>No transcripts saved yet.</p>
     </section>
   </main>
   <script src="/app.js"></script>

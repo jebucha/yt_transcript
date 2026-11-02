@@ -53,6 +53,14 @@ if the host directory is missing or unwritable, the transcript is still
 returned and the failure is only logged as `transcript_save_failed`; the app
 never creates the directory itself.
 
+Saved transcripts are browsable from the UI: the **Saved transcripts**
+section lists every saved file (most recent first) and loads on page load,
+after each successful fetch, and via its Refresh button (no polling).
+Clicking a row displays the transcript in the result panel, where Copy keeps
+working and the **Download** button saves it as a `.txt` file named after the
+stored file (client-side, works over plain HTTP). If the transcript directory
+is missing or unreadable the section simply shows an empty state.
+
 **Host-directory permissions (native Linux).** The container runs as the
 unprivileged `appuser`, so the host directory must be writable by that user.
 If saves log `transcript_save_failed` with a permission error, align the host
@@ -100,17 +108,22 @@ curl -s -X POST http://127.0.0.1:8000/api/transcript \
   -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 # -> 200 {"text": ..., "video_id": "dQw4w9WgXcQ", "title": ..., "language": "en", "source": "primary"}
 
-# 3) A bad URL
+# 3) The saved-transcript list
+curl -s http://127.0.0.1:8000/api/transcripts
+# -> 200 {"transcripts": [{"name": "the_end_of_llms_ncm.txt", "size": ..., "modified": ...}, ...]}
+#    (most recent first; an empty array when the transcript directory is empty or missing)
+
+# 4) A bad URL
 curl -s -X POST http://127.0.0.1:8000/api/transcript \
   -H "Content-Type: application/json" \
   -d '{"url": "not a url"}'
 # -> 400 {"error": {"code": "INVALID_URL", "message": ...}}
 
-# 4) The structured logs
+# 5) The structured logs
 docker logs yt-transcript        # or: podman logs yt-transcript
 #    -> a "transcript_saved" event with the file path and byte count
 
-# 5) The transcript file is persisted (compose only)
+# 6) The transcript file is persisted (compose only)
 ls -l /home/john/transcripts/    # -> one .txt file named after the video title
 ```
 
