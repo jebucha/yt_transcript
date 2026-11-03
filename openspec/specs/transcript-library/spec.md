@@ -67,7 +67,7 @@ When the transcript directory does not exist, is not a directory, or cannot be r
   - **Pass:** exit code 0, no skipped tests
 
 ### Requirement: Single transcript read endpoint
-`GET /api/transcripts/{name}` SHALL return 200 with the transcript whose file name matches, read from the transcript directory. The returned text SHALL be exactly the file's UTF-8 content — for a file written by the app, the transcript text plus one trailing newline — so the read result round-trips byte-for-byte with the saved file.
+`GET /api/transcripts/{name}` SHALL return 200 with the transcript whose file name matches, read from the transcript directory. The returned text SHALL be exactly the file's UTF-8 content — for a file written by the app, the video's watch URL as the first line, followed by the transcript text and a single trailing newline — so the read result round-trips byte-for-byte with the saved file.
 
 #### Scenario: Known transcript is returned
 - **WHEN** the transcript directory contains `the_end_of_llms_ncm.txt` whose content is `Hello there.\n` and a request is made for that file name
@@ -80,7 +80,7 @@ When the transcript directory does not exist, is not a directory, or cannot be r
 
 #### Scenario: Fetched transcript round-trips through the store
 - **WHEN** a fetch succeeds (persisting a file) and the same transcript is then read back by file name
-- **THEN** the read text equals the fetched transcript text plus a single trailing newline
+- **THEN** the read text equals the video's watch URL as the first line, followed by the fetched transcript text, and a single trailing newline
 - **Test Requirement**
   - **ID:** T-TRANSCRIPT-LIBRARY-008
   - **File:** tests/test_transcript_library.py::test_read_roundtrips_after_successful_fetch

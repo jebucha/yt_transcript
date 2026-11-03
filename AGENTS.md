@@ -38,6 +38,11 @@ Feature work follows the OpenSpec change workflow (see `openspec/`):
 did not write the code) → `/opsx-archive`. Validation reports live under
 `openspec/changes/<name>/validations/`.
 
+Before archiving, bump the app's minor version for any change that ships
+user-visible changes: run `uv version --bump minor` (never hand-edit
+`pyproject.toml`). Under 0.x versioning, breaking changes also take a minor
+bump.
+
 ## Conventions
 
 - Vanilla JS UI with no build step, no framework, no CDN; all fetched content

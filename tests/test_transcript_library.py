@@ -345,9 +345,11 @@ def _result(text, video_id, title):
 
 
 def test_read_roundtrips_after_successful_fetch(tmp_path, monkeypatch):
-    """T-TRANSCRIPT-LIBRARY-008: fetch persists, then read returns the same
-    text plus one trailing newline — byte-for-byte with the saved file."""
+    """T-TRANSCRIPT-LIBRARY-008: fetch persists, then read returns the watch
+    URL line, the transcript text, and a trailing newline — byte-for-byte with
+    the saved file."""
     text = "This is the transcript of the test video."
+    expected = "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n" + text + "\n"
     name = derive_file_name("The End of LLMs? (NCM)", "dQw4w9WgXcQ")
     monkeypatch.setattr(
         chain_mod,
@@ -364,9 +366,9 @@ def test_read_roundtrips_after_successful_fetch(tmp_path, monkeypatch):
         read = client.get(f"/api/transcripts/{name}")
 
     assert read.status_code == 200
-    assert read.json() == {"name": name, "text": text + "\n"}
+    assert read.json() == {"name": name, "text": expected}
     # The read round-trips byte-for-byte with the saved file.
-    assert (tmp_path / name).read_bytes() == (text + "\n").encode("utf-8")
+    assert (tmp_path / name).read_bytes() == expected.encode("utf-8")
 
 
 class DelayedChain:

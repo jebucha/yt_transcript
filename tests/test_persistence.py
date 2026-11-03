@@ -2,7 +2,7 @@
 logging, and endpoint integration.
 
 Test Requirement IDs:
-  T-TRANSCRIPT-PERSISTENCE-001..011, T-STRUCTURED-LOGGING-010/011/014
+  T-TRANSCRIPT-PERSISTENCE-001..012, T-STRUCTURED-LOGGING-010/011/014
 """
 
 import io
@@ -72,7 +72,25 @@ def test_directory_from_environment_variable(tmp_path, monkeypatch):
     path = save_transcript("hello world", "A Title", "dQw4w9WgXcQ")
 
     assert path == str(target / "a_title.txt")
-    assert (target / "a_title.txt").read_text(encoding="utf-8") == "hello world\n"
+    assert (target / "a_title.txt").read_text(encoding="utf-8") == (
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhello world\n"
+    )
+
+
+def test_saved_file_starts_with_video_url_header(tmp_path, monkeypatch):
+    """T-TRANSCRIPT-PERSISTENCE-012"""
+    target = tmp_path / "transcripts"
+    target.mkdir()
+    monkeypatch.setenv("TRANSCRIPT_DIR", str(target))
+
+    text = "This is the transcript of the test video."
+    path = save_transcript(text, "The End of LLMs? (NCM)", "dQw4w9WgXcQ")
+
+    assert path == str(target / "the_end_of_llms_ncm.txt")
+    content = (target / "the_end_of_llms_ncm.txt").read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+    assert lines[0] == "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
+    assert "".join(lines[1:]) == text + "\n"
 
 
 def test_unwritable_directory_still_returns_transcript(tmp_path, monkeypatch):
@@ -108,7 +126,9 @@ def test_successful_save_logged(tmp_path, monkeypatch):
     assert entry["level"] == "info"
     assert entry["video_id"] == "dQw4w9WgXcQ"
     assert entry["path"] == str(target / "a_title.txt")
-    assert entry["bytes"] == len("hello\n".encode("utf-8"))
+    assert entry["bytes"] == len(
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhello\n".encode("utf-8")
+    )
 
 
 def test_failed_save_logged(tmp_path, monkeypatch):
@@ -199,7 +219,11 @@ def test_successful_fetch_writes_file(tmp_path, monkeypatch):
     assert response.status_code == 200
     fpath = target / "the_end_of_llms_ncm.txt"
     assert fpath.exists()
-    assert fpath.read_text(encoding="utf-8") == response.json()["text"] + "\n"
+    assert fpath.read_text(encoding="utf-8") == (
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
+        + response.json()["text"]
+        + "\n"
+    )
 
 
 def test_failed_fetch_writes_no_file(tmp_path, monkeypatch):
@@ -241,7 +265,9 @@ def test_refetch_overwrites_existing_file(tmp_path, monkeypatch):
                     json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})
 
     fpath = target / "a_title.txt"
-    assert fpath.read_text(encoding="utf-8") == "second fetch\n"
+    assert fpath.read_text(encoding="utf-8") == (
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ\nsecond fetch\n"
+    )
 
 
 def test_distinct_videos_same_title_last_write_wins(tmp_path, monkeypatch):
@@ -265,7 +291,9 @@ def test_distinct_videos_same_title_last_write_wins(tmp_path, monkeypatch):
 
     # Both titles derive the same file name; the most recent write wins.
     fpath = target / "same_title.txt"
-    assert fpath.read_text(encoding="utf-8") == "transcript B\n"
+    assert fpath.read_text(encoding="utf-8") == (
+        "https://www.youtube.com/watch?v=bbbbbbbbbbb\ntranscript B\n"
+    )
 
 
 def test_unwritable_directory_still_returns_200(tmp_path, monkeypatch):

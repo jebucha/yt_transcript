@@ -80,13 +80,15 @@ def transcript_dir() -> Path:
 def save_transcript(text: str, title: str, video_id: str) -> str | None:
     """Best-effort write of a transcript to a plain-text file (design 4).
 
-    Writes ``text`` plus a single trailing newline as UTF-8 to
-    ``<transcript_dir>/<derived name>`` with a plain overwrite. Never raises to
-    the caller: on success it logs ``transcript_saved`` and returns the written
-    path; on any write error it logs ``transcript_save_failed`` and returns
-    ``None``.
+    Writes the video's watch URL (``https://www.youtube.com/watch?v=<video_id>``)
+    as the first line, then ``text``, then a single trailing newline — as UTF-8
+    to ``<transcript_dir>/<derived name>`` with a plain overwrite. Never raises
+    to the caller: on success it logs ``transcript_saved`` and returns the
+    written path; on any write error it logs ``transcript_save_failed`` and
+    returns ``None``.
     """
-    content = text + "\n"
+    header = f"https://www.youtube.com/watch?v={video_id}"
+    content = f"{header}\n{text}\n"
     data = content.encode("utf-8")
     logger = get_logger()
     # Resolve the target outside the try: derivation does no I/O, and the
