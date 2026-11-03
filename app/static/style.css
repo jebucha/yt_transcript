@@ -29,6 +29,15 @@ body {
   padding: 32px 16px 64px;
 }
 
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-titles { min-width: 0; }
+
 h1 {
   font-size: 1.6rem;
   margin: 0 0 4px;
@@ -234,4 +243,21 @@ h1 {
   margin: 12px 0 0;
   color: var(--muted);
   font-size: 0.95rem;
+}
+
+/* --- Log viewer ---------------------------------------------------------------- */
+
+.log-panel {
+  margin: 32px 0 0;
+  padding: 14px 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

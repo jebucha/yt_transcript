@@ -298,6 +298,119 @@
     downloadTranscript();
   });
 
+  // --- log viewer -----------------------------------------------------------------
+  // The server's structured log stream (SSE) is appended live as humanized
+  // lines. Visibility is purely a display concern: entries keep accumulating
+  // while the panel is hidden, so re-showing it includes what was logged in
+  // the meantime. Every string enters the DOM via textContent only.
+
+  var logPanel = document.getElementById("log-panel");
+  var logsToggle = document.getElementById("logs-toggle");
+  var LOG_DISPLAY_CAP = 200;
+
+  // Known event types get a dedicated one-line format; anything else falls
+  // back to "event  key=value ..." (see formatLogEntry).
+  var LOG_FORMATTERS = {
+    server_started: function (e) {
+      return "server started on port " + e.port;
+    },
+    server_stopped: function (e) {
+      return "server stopped";
+    },
+    http_request: function (e) {
+      return e.method + " " + e.path + " -> " + e.status + " (" + e.duration_ms + " ms)";
+    },
+    fetch_attempt: function (e) {
+      if (e.outcome === "success") {
+        return (
+          "fetched " + e.video_id + " via " + e.source +
+          " in " + e.duration_ms + " ms (" + e.chars + " chars)"
+        );
+      }
+      var line = "fetch failed: " + e.video_id + " via " + e.source +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    fetch_rejected: function (e) {
+      return "fetch rejected: " + e.video_id + " [" + e.reason + "]";
+    },
+    transcript_saved: function (e) {
+      return (
+        "transcript saved: " + e.video_id + " -> " + e.path +
+        " (" + e.bytes + " bytes)"
+      );
+    },
+    transcript_save_failed: function (e) {
+      var line = "transcript save failed: " + e.video_id + " at " + e.path +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    unhandled_exception: function (e) {
+      var message = "";
+      if (e.exc_info) {
+        // Keep the entry on one line: use the exception's final line.
+        var lines = String(e.exc_info).split("\n");
+        message = lines[lines.length - 1].trim();
+      }
+      return "unhandled exception" + (message ? ": " + message : "");
+    }
+  };
+
+  function logTime(timestamp) {
+    var date = timestamp ? new Date(timestamp) : new Date();
+    return isNaN(date.getTime()) ? "" : date.toISOString().slice(11, 19);
+  }
+
+  function formatLogEntry(entry) {
+    var event = entry.event || "unknown";
+    var level = String(entry.level || "info").toUpperCase();
+    var formatter = LOG_FORMATTERS[event];
+    var body;
+    if (formatter) {
+      body = formatter(entry);
+    } else {
+      var fields = [];
+      for (var key in entry) {
+        if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+        if (key === "event" || key === "level" || key === "timestamp") continue;
+        fields.push(key + "=" + entry[key]);
+      }
+      body = event + (fields.length ? "  " + fields.join(" ") : "");
+    }
+    return logTime(entry.timestamp) + "  " + level + "  " + body;
+  }
+
+  function appendLogEntry(entry) {
+    var line = document.createElement("div");
+    line.className = "log-line";
+    line.textContent = formatLogEntry(entry);
+    logPanel.appendChild(line);
+    while (logPanel.childNodes.length > LOG_DISPLAY_CAP) {
+      logPanel.removeChild(logPanel.firstChild);
+    }
+  }
+
+  logsToggle.addEventListener("click", function () {
+    logPanel.hidden = !logPanel.hidden;
+    logsToggle.textContent = logPanel.hidden ? "Show logs" : "Hide logs";
+  });
+
+  if (typeof EventSource !== "undefined") {
+    var logSource = new EventSource("/api/logs");
+    logSource.addEventListener("message", function (event) {
+      var entry = null;
+      try {
+        entry = JSON.parse(event.data);
+      } catch (_) {
+        return; // unparseable payload: nothing to show
+      }
+      appendLogEntry(entry);
+    });
+    // EventSource reconnects automatically; nothing to do on error.
+  }
+
   // Load once on page load. There is no automatic polling (design decision 6).
   loadSavedList();
 })();

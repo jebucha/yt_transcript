@@ -6,8 +6,9 @@ single-flight semaphore ensures at most one chain hits YouTube at a time;
 concurrent callers are rejected immediately with BusyError (HTTP 503).
 
 Every attempt is logged as one structured entry (event "fetch_attempt") with
-the video ID, requested language, fetcher source, outcome (+ failure reason),
-duration in ms, and the transcript character count on success.
+the video ID, requested language, fetcher source, outcome (+ failure reason
+and the failure's cause detail), duration in ms, and the transcript
+character count on success.
 """
 
 from __future__ import annotations
@@ -92,6 +93,7 @@ class FetchChain:
                 source=source,
                 outcome="failure",
                 reason=exc.code,
+                detail=exc.message,
                 duration_ms=round((time.monotonic() - start) * 1000.0, 2),
             )
             raise
@@ -106,6 +108,7 @@ class FetchChain:
                 source=source,
                 outcome="failure",
                 reason=timeout_err.code,
+                detail=timeout_err.message,
                 duration_ms=round((time.monotonic() - start) * 1000.0, 2),
             )
             raise timeout_err from exc
@@ -120,6 +123,7 @@ class FetchChain:
                 source=source,
                 outcome="failure",
                 reason=generic.code,
+                detail=generic.message,
                 duration_ms=round((time.monotonic() - start) * 1000.0, 2),
             )
             raise generic from exc

@@ -13,13 +13,20 @@ from typing import IO, Optional
 
 import structlog
 
+from app import logbus
+
 
 def setup_logging(stream: Optional[IO[str]] = None) -> None:
     """Configure structlog to emit one JSON object per line.
 
-    ``stream`` defaults to ``sys.stdout`` (resolved when a logger is created,
-    which keeps the configuration test-friendly).
+    ``stream`` defaults to a ``TeeStream`` that forwards every line to
+    ``sys.stdout`` (resolved at write time, which keeps the configuration
+    test-friendly) and mirrors rendered JSON entries into
+    ``logbus.DEFAULT_BUS`` for the log viewer. An explicitly passed stream is
+    used as-is and never touches the bus.
     """
+    if stream is None:
+        stream = logbus.TeeStream(logbus.DEFAULT_BUS)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

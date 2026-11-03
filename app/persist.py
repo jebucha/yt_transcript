@@ -89,8 +89,11 @@ def save_transcript(text: str, title: str, video_id: str) -> str | None:
     content = text + "\n"
     data = content.encode("utf-8")
     logger = get_logger()
+    # Resolve the target outside the try: derivation does no I/O, and the
+    # failure handler below always references ``path`` (it must stay defined,
+    # or a pre-assignment exception would escape this function).
+    path = transcript_dir() / derive_file_name(title, video_id)
     try:
-        path = transcript_dir() / derive_file_name(title, video_id)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
     except Exception as exc:
@@ -98,6 +101,8 @@ def save_transcript(text: str, title: str, video_id: str) -> str | None:
             "transcript_save_failed",
             video_id=video_id,
             reason=type(exc).__name__,
+            path=str(path),
+            detail=str(exc),
         )
         return None
     logger.info(

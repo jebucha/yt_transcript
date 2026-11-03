@@ -2,7 +2,7 @@
 logging, and endpoint integration.
 
 Test Requirement IDs:
-  T-TRANSCRIPT-PERSISTENCE-001..011, T-STRUCTURED-LOGGING-010/011
+  T-TRANSCRIPT-PERSISTENCE-001..011, T-STRUCTURED-LOGGING-010/011/014
 """
 
 import io
@@ -128,6 +128,28 @@ def test_failed_save_logged(tmp_path, monkeypatch):
     assert entry["video_id"] == "dQw4w9WgXcQ"
     # Machine-readable failure reason = the exception type name.
     assert entry["reason"] == "FileNotFoundError"
+
+
+def test_failed_save_includes_path_and_detail(tmp_path, monkeypatch):
+    """T-STRUCTURED-LOGGING-014"""
+    buf = io.StringIO()
+    applog.setup_logging(stream=buf)
+    missing = tmp_path / "does-not-exist"
+    monkeypatch.setenv("TRANSCRIPT_DIR", str(missing))
+
+    save_transcript("hello", "A Title", "dQw4w9WgXcQ")
+
+    lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["event"] == "transcript_save_failed"
+    assert entry["video_id"] == "dQw4w9WgXcQ"
+    assert entry["reason"] == "FileNotFoundError"
+    # the attempted target path and the OS error string are both carried
+    expected_path = str(missing / "a_title.txt")
+    assert entry["path"] == expected_path
+    assert expected_path in entry["detail"]
+    assert "No such file or directory" in entry["detail"]
 
 
 # --- 3. Endpoint integration -----------------------------------------------

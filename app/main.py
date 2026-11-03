@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from queue import Empty
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import chain as chain_mod
 from app import log as applog
+from app import logbus
 from app.errors import TranscriptError
 from app.library import (
     is_structurally_invalid_name,
@@ -26,6 +29,11 @@ from app.persist import save_transcript
 
 STATIC_DIR = Path(__file__).parent / "static"
 DEFAULT_PORT = 8000
+
+# How long a log stream waits for the next entry before looping again. The
+# poll runs in an executor thread, so a client disconnect can cancel the
+# in-flight poll instead of leaving a worker blocked in queue.get().
+LOG_POLL_TIMEOUT = 0.5
 
 
 class TranscriptRequest(BaseModel):
@@ -134,6 +142,37 @@ def create_app() -> FastAPI:
                                    "message": "This transcript is no longer available."}},
             )
         return {"name": name, "text": text}
+
+    @app.get("/api/logs")
+    async def log_stream_endpoint():
+        # Server-sent events stream of the in-memory log bus (design 2-4).
+        # Read-only: no filesystem work, and it never touches the fetch chain
+        # or the single-flight semaphore.
+        bus = logbus.DEFAULT_BUS
+
+        async def event_stream():
+            # Subscribe before snapshotting: an entry logged between the two
+            # would otherwise be lost on the first connect.
+            queue = bus.subscribe()
+            try:
+                for entry in bus.snapshot():
+                    yield f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+                while True:
+                    try:
+                        entry = await asyncio.to_thread(
+                            queue.get, timeout=LOG_POLL_TIMEOUT
+                        )
+                    except Empty:
+                        continue
+                    yield f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+            finally:
+                bus.unsubscribe(queue)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # Mounted last so the API routes above take precedence.
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
