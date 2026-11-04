@@ -18,6 +18,12 @@
   var savedEmpty = document.getElementById("saved-empty");
   var savedCount = document.getElementById("saved-count");
   var savedRefreshBtn = document.getElementById("saved-refresh-btn");
+  var providerPicker = document.getElementById("provider-picker");
+  var summarizeBtn = document.getElementById("summarize-btn");
+  var summarizeSpinner = document.getElementById("summarize-spinner");
+  var summaryPanel = document.getElementById("summary-panel");
+  var summaryTextEl = document.getElementById("summary-text");
+  var summaryCopyBtn = document.getElementById("summary-copy-btn");
 
   var ERROR_MESSAGES = {
     INVALID_URL:
@@ -29,14 +35,37 @@
     UPSTREAM_FAILURE:
       "Couldn't fetch the transcript — YouTube may be rate-limiting or blocking the server. Please try again later.",
     BUSY:
-      "The server is busy with another transcript right now. Please try again in a moment."
+      "The server is busy with another transcript right now. Please try again in a moment.",
+    NOT_CONFIGURED:
+      "Summarization is not set up — no providers are configured.",
+    INVALID_PROVIDER:
+      "That provider or model is no longer configured. Reload the page and try again.",
+    PROVIDER_ERROR:
+      "The summarization backend failed — it may be down or overloaded. Please try again.",
+    INPUT_TOO_LONG:
+      "This transcript is too long to summarize (over 100,000 characters)."
   };
 
   var currentTranscript = "";
   // Real file name of the displayed saved transcript ("" for a freshly
   // fetched transcript, which the UI has no trustworthy name to download).
   var currentSavedName = "";
+  // Trustworthy file name of the displayed transcript: the derived name from
+  // the fetch response, or the saved row's name (used by Summarize). Kept
+  // separate from currentSavedName, which still drives Download's predicate.
+  var currentTranscriptName = "";
+  var currentSummary = "";
+  // Monotonic display token: a late summary response for a previously
+  // displayed transcript must not populate the panel.
+  var displayToken = 0;
+  var summarizing = false;
   var restoreCopyLabelTimer = null;
+  var restoreSummaryCopyLabelTimer = null;
+  // Loaded provider list (display side only — never keys or base URLs) and
+  // the picker options, parallel to the <select>'s options.
+  var providers = [];
+  var defaultProviderId = null;
+  var providerOptions = [];
 
   function setBusy(busy) {
     fetchBtn.disabled = busy;
@@ -63,6 +92,9 @@
     currentTranscript = data.text;
     // A freshly fetched transcript has no trustworthy file name to download.
     currentSavedName = "";
+    // ...but the fetch response carries its derived persistence name, which
+    // Summarize uses for the alongside save.
+    currentTranscriptName = data.name || "";
     downloadBtn.disabled = true;
     titleEl.textContent = data.title || "";
     langEl.textContent = data.language ? "Language: " + data.language : "";
@@ -70,6 +102,9 @@
     resultSection.hidden = false;
     copyBtn.disabled = false;
     panel.scrollTop = 0;
+    displayToken++; // invalidate any in-flight saved-summary load
+    clearSummary();
+    updateSummarizeEnabled();
   }
 
   async function doFetch() {
@@ -262,6 +297,7 @@
       }
       currentTranscript = data.text;
       currentSavedName = data.name;
+      currentTranscriptName = data.name;
       titleEl.textContent = data.name;
       langEl.textContent = ""; // no language to show for a saved transcript
       panel.textContent = data.text;
@@ -270,6 +306,11 @@
       // Only a saved transcript has a trustworthy file name to download.
       downloadBtn.disabled = false;
       panel.scrollTop = 0;
+      displayToken++; // invalidate any in-flight saved-summary load
+      clearSummary();
+      updateSummarizeEnabled();
+      // Best-effort: if this transcript has a saved summary, show it.
+      loadSavedSummary(data.name, displayToken);
     } catch (_) {
       showError("Network error — could not reach the server. Please try again.");
     }
@@ -297,6 +338,171 @@
   downloadBtn.addEventListener("click", function () {
     downloadTranscript();
   });
+
+  // --- summarization --------------------------------------------------------------
+  // The provider list is loaded once on page load (no polling, same
+  // convention as the saved list). The picker offers one option per
+  // provider/model pair; the server is the only holder of keys and base
+  // URLs, so the picker never sees them. Every string enters the DOM via
+  // textContent only.
+
+  function renderProviderPicker() {
+    providerPicker.textContent = "";
+    providerOptions = [];
+    for (var i = 0; i < providers.length; i++) {
+      var provider = providers[i];
+      for (var j = 0; j < provider.models.length; j++) {
+        var option = document.createElement("option");
+        option.textContent = provider.name + " — " + provider.models[j];
+        providerOptions.push({ provider: provider.id, model: provider.models[j] });
+        providerPicker.appendChild(option);
+      }
+    }
+    // Pre-select the default provider's first model; without a usable
+    // default, the first option.
+    var selectedIndex = 0;
+    for (var k = 0; k < providerOptions.length; k++) {
+      if (providerOptions[k].provider === defaultProviderId) {
+        selectedIndex = k;
+        break;
+      }
+    }
+    providerPicker.selectedIndex = selectedIndex;
+  }
+
+  async function loadProviders() {
+    try {
+      var res = await fetch("/api/providers");
+      if (!res.ok) return; // keep the not-configured state
+      var data = await res.json();
+      providers = data.providers || [];
+      defaultProviderId = data.default || null;
+    } catch (_) {
+      providers = [];
+      defaultProviderId = null;
+    }
+    renderProviderPicker();
+    updateSummarizeEnabled();
+  }
+
+  // Summarize is enabled only while a transcript is displayed and at least
+  // one provider is configured; while a request is in flight the button and
+  // the picker are both disabled.
+  function updateSummarizeEnabled() {
+    var enabled =
+      !summarizing &&
+      !resultSection.hidden &&
+      providerOptions.length > 0;
+    summarizeBtn.disabled = !enabled;
+    providerPicker.disabled = !enabled;
+  }
+
+  function showSummaryPanel() {
+    summaryTextEl.textContent = currentSummary;
+    summaryPanel.hidden = false;
+    summaryCopyBtn.disabled = false;
+  }
+
+  function clearSummary() {
+    currentSummary = "";
+    summaryTextEl.textContent = "";
+    summaryPanel.hidden = true;
+    summaryCopyBtn.disabled = true;
+  }
+
+  // Best-effort load of a saved summary for a clicked saved transcript: a
+  // 404 or network error leaves the panel hidden and the page unaffected.
+  async function loadSavedSummary(name, token) {
+    try {
+      var res = await fetch("/api/transcripts/" + encodeURIComponent(name) + "/summary");
+      if (!res.ok) return;
+      var data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        data = null;
+      }
+      // The transcript may have changed in the meantime: stale result.
+      if (token !== displayToken) return;
+      if (data && typeof data.summary === "string" && data.summary) {
+        currentSummary = data.summary;
+        showSummaryPanel();
+      }
+    } catch (_) {
+      // network failure: panel stays hidden, nothing else to do
+    }
+  }
+
+  function showSummaryCopied() {
+    summaryCopyBtn.textContent = "Copied!";
+    summaryCopyBtn.disabled = true;
+    if (restoreSummaryCopyLabelTimer) clearTimeout(restoreSummaryCopyLabelTimer);
+    restoreSummaryCopyLabelTimer = setTimeout(function () {
+      summaryCopyBtn.textContent = "Copy summary";
+      summaryCopyBtn.disabled = false;
+      restoreSummaryCopyLabelTimer = null;
+    }, 1500);
+  }
+
+  summaryCopyBtn.addEventListener("click", async function () {
+    if (summaryCopyBtn.disabled || !currentSummary) return;
+    var ok = await copyText(currentSummary);
+    if (ok) showSummaryCopied();
+  });
+
+  async function doSummarize() {
+    if (summarizeBtn.disabled || summarizing) return;
+    var selection = providerOptions[providerPicker.selectedIndex];
+    if (!selection || !currentTranscript) return;
+    summarizing = true;
+    summarizeSpinner.hidden = false;
+    summarizeBtn.disabled = true;
+    providerPicker.disabled = true;
+    clearError();
+    try {
+      var res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: currentTranscript,
+          name: currentTranscriptName,
+          provider: selection.provider,
+          model: selection.model
+        })
+      });
+      var data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        data = null;
+      }
+      if (!res.ok || !data || typeof data.summary !== "string") {
+        var code = data && data.error ? data.error.code : null;
+        var serverMessage = data && data.error ? data.error.message : null;
+        showError(messageFor(code, serverMessage));
+        return;
+      }
+      // A 2xx whose body carries no summary text is a failed summarization
+      // for display (same truthiness check as loadSavedSummary): show the
+      // error region, never an empty panel.
+      if (!data.summary) {
+        showError(
+          "The summarization backend returned no summary text. Please try again."
+        );
+        return;
+      }
+      currentSummary = data.summary;
+      showSummaryPanel();
+    } catch (_) {
+      showError("Network error — could not reach the server. Please try again.");
+    } finally {
+      summarizing = false;
+      summarizeSpinner.hidden = true;
+      updateSummarizeEnabled();
+    }
+  }
+
+  summarizeBtn.addEventListener("click", doSummarize);
 
   // --- log viewer -----------------------------------------------------------------
   // The server's structured log stream (SSE) is appended live as humanized
@@ -343,6 +549,31 @@
     },
     transcript_save_failed: function (e) {
       var line = "transcript save failed: " + e.video_id + " at " + e.path +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    summary_completed: function (e) {
+      return (
+        "summary completed: " + e.provider + "/" + e.model +
+        " in " + e.duration_ms + " ms (" + e.chars_in + " chars in, " +
+        e.chars_out + " chars out)"
+      );
+    },
+    summary_failed: function (e) {
+      var line = "summary failed: " + e.provider + "/" + e.model +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    summary_save_failed: function (e) {
+      var line = "summary save failed: " + e.name + " at " + e.path +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    config_load_failed: function (e) {
+      var line = "provider config load failed: " + e.path +
                  " [" + e.reason + "]";
       if (e.detail) line += " " + e.detail;
       return line;
@@ -413,4 +644,5 @@
 
   // Load once on page load. There is no automatic polling (design decision 6).
   loadSavedList();
+  loadProviders();
 })();

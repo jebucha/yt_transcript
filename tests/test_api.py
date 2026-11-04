@@ -54,12 +54,16 @@ def test_success_shape(client_and_chain):
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body.keys()) == {"text", "video_id", "title", "language", "source"}
+    assert set(body.keys()) == {
+        "text", "video_id", "title", "language", "source", "name",
+    }
     assert body["text"] == "hello world"
     assert body["video_id"] == "dQw4w9WgXcQ"
     assert body["title"] == "A Title"
     assert body["language"] == "en"
     assert body["source"] == "primary"
+    # the derived persistence name (design decision 5)
+    assert body["name"] == "a_title.txt"
     assert fake.calls == ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]
 
 

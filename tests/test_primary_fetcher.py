@@ -101,3 +101,42 @@ def test_output_is_clean_plain_text(monkeypatch):
     assert "[00:12]" not in text
     assert "-->" not in text
     assert "plain spaced out" in text
+
+
+def test_response_includes_derived_name(monkeypatch, tmp_path):
+    """T-TRANSCRIPT-RETRIEVAL-017 — the fetch response's file-name field is
+    the exact name the persistence layer writes the file under."""
+    from starlette.testclient import TestClient
+
+    from app import chain as chain_mod
+    from app.chain import FetchResult
+    from app.main import create_app
+
+    class FakeChain:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, url):
+            self.calls.append(url)
+            return FetchResult(
+                text="The end of the LLMs, NCM and all.",
+                video_id="dQw4w9WgXcQ",
+                title="The End of LLMs? (NCM)",
+                language="en",
+                source="primary",
+            )
+
+    fake = FakeChain()
+    monkeypatch.setattr(chain_mod, "default_chain", fake)
+    monkeypatch.setenv("TRANSCRIPT_DIR", str(tmp_path / "transcripts"))
+
+    client = TestClient(create_app())
+    with client:
+        response = client.post(
+            "/api/transcript",
+            json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+        )
+
+    assert response.status_code == 200
+    # the same title-based derivation the persistence layer uses
+    assert response.json()["name"] == "the_end_of_llms_ncm.txt"

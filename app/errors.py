@@ -70,5 +70,47 @@ class BusyError(TranscriptError):
         return "The server is busy with another transcript. Please try again in a moment."
 
 
+class SummaryNotConfiguredError(TranscriptError):
+    code = "NOT_CONFIGURED"
+    status = 503
+
+    @property
+    def default_message(self) -> str:
+        return (
+            "Summarization is not configured — no usable providers were found. "
+            "Add a providers.json file (or point PROVIDERS_CONFIG at one) to enable it."
+        )
+
+
+class InvalidProviderError(TranscriptError):
+    code = "INVALID_PROVIDER"
+    status = 400
+
+    @property
+    def default_message(self) -> str:
+        return (
+            "Unknown provider or model — it may no longer be configured. "
+            "Reload the page and try again."
+        )
+
+
+class ProviderError(TranscriptError):
+    code = "PROVIDER_ERROR"
+    status = 502
+
+    @property
+    def default_message(self) -> str:
+        return "The summarization backend failed. Please try again."
+
+
+class InputTooLongError(TranscriptError):
+    code = "INPUT_TOO_LONG"
+    status = 400
+
+    @property
+    def default_message(self) -> str:
+        return "This transcript is too long to summarize (over 100,000 characters)."
+
+
 # Codes for which a fallback attempt is made (transient upstream problems only).
 FALLBACK_CODES = frozenset({"UPSTREAM_FAILURE"})

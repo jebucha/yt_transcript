@@ -1,0 +1,23 @@
+{
+  "default": "ollama",
+  "provider": {
+    "ollama": {
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "llama3.1:8b": "Llama 3.1 8B"
+      }
+    },
+    "lmstudio": {
+      "name": "LM Studio (local)",
+      "options": {
+        "baseURL": "http://localhost:1234/v1"
+      },
+      "models": {
+        "qwen2.5-14b-instruct": "Qwen 2.5 14B Instruct"
+      }
+    }
+  }
+}

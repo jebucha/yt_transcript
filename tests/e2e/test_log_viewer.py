@@ -8,6 +8,7 @@ Run:  python -m pytest tests/e2e/ -q
 (One-time:  python -m playwright install chromium)
 """
 
+import os
 import threading
 
 import pytest
@@ -15,8 +16,10 @@ from playwright.sync_api import sync_playwright
 
 from app import chain as chain_mod
 from app import log as applog
+from app import summarize as summarize_mod
 from app.chain import FetchChain
 from app.errors import UpstreamFailureError
+from tests.e2e.test_summarization import PROVIDER_CONFIG, SummarizeStub, write_provider_config
 from tests.e2e.test_ui import StubChain, _free_port, _wait_ready
 
 
@@ -57,13 +60,26 @@ def _panel_line(page, marker):
 
 
 @pytest.fixture(scope="module")
-def server():
+def server(tmp_path_factory):
     from app import main as app_main
     import uvicorn
 
     stub = StubChain()
+    summarize_stub = SummarizeStub()
     original_chain = chain_mod.default_chain
     chain_mod.default_chain = stub
+    original_dispatch = summarize_mod._call_chat_completions
+    summarize_mod._call_chat_completions = summarize_stub
+
+    # The same provider-config harness as test_summarization.py: the app
+    # reads the config per request, so the summarization tests below can
+    # drive real summarize requests without LLM traffic.
+    config_file = write_provider_config(
+        tmp_path_factory.mktemp("provider-config") / "providers.json",
+        PROVIDER_CONFIG,
+    )
+    original_config_env = os.environ.get("PROVIDERS_CONFIG")
+    os.environ["PROVIDERS_CONFIG"] = str(config_file)
 
     port = _free_port()
     config = uvicorn.Config(app_main.app, host="127.0.0.1", port=port, log_level="warning")
@@ -72,11 +88,21 @@ def server():
     thread.start()
     _wait_ready(port)
 
-    yield {"port": port, "stub": stub, "base": f"http://127.0.0.1:{port}"}
+    yield {
+        "port": port,
+        "stub": stub,
+        "summarize_stub": summarize_stub,
+        "base": f"http://127.0.0.1:{port}",
+    }
 
     uvicorn_server.should_exit = True
     thread.join(timeout=10)
     chain_mod.default_chain = original_chain
+    summarize_mod._call_chat_completions = original_dispatch
+    if original_config_env is None:
+        os.environ.pop("PROVIDERS_CONFIG", None)
+    else:
+        os.environ["PROVIDERS_CONFIG"] = original_config_env
 
 
 @pytest.fixture(scope="module")
@@ -87,9 +113,10 @@ def playwright():
 
 @pytest.fixture(autouse=True)
 def _reset_stub(server):
-    """Fresh stub state (scenario + call log) for every test."""
+    """Fresh stub state (scenarios + call logs) for every test."""
     server["stub"].calls = []
     server["stub"].set_success()
+    server["summarize_stub"].reset()
     yield
 
 
@@ -267,3 +294,41 @@ def test_markup_rendered_as_plain_text(page):
     # ...not rendered or executed
     assert page.locator("#log-panel script").count() == 0
     assert page.evaluate("() => window.__log_viewer_pwned") is None
+
+
+# --- T-LOG-VIEWER-018 .. 019: summary events ----------------------------------
+
+
+def _fetch_and_summarize(page, server):
+    server["stub"].set_success()
+    _fetch(page, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    page.wait_for_selector("#result:not([hidden])", timeout=10_000)
+    page.click("#summarize-btn")
+
+
+def test_summary_failure_shown_with_cause(page, server):
+    server["summarize_stub"].set_failure("http_error", "backend returned HTTP 500")
+    page.click("#logs-toggle")
+    _fetch_and_summarize(page, server)
+
+    _wait_panel_text(page, "summary failed")
+    line = _panel_line(page, "summary failed")
+    # identifies the failed summarization (provider, model) together with
+    # the failure's cause detail
+    assert "alpha" in line
+    assert "model-a1" in line
+    assert "http_error" in line
+    assert "backend returned HTTP 500" in line
+
+
+def test_summary_success_shown(page, server):
+    page.click("#logs-toggle")
+    _fetch_and_summarize(page, server)
+
+    _wait_panel_text(page, "summary completed")
+    line = _panel_line(page, "summary completed")
+    # identifies the completed summarization (provider, model) with its
+    # duration
+    assert "alpha" in line
+    assert "model-a1" in line
+    assert "ms" in line

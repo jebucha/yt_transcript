@@ -155,6 +155,48 @@ h1 {
   line-height: 1.55;
 }
 
+.provider-picker {
+  max-width: 230px;
+  padding: 9px 10px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* --- Summary panel ---------------------------------------------------------- */
+
+.summary-panel { margin-top: 16px; }
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.summary-text {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
 /* --- Saved transcripts section -------------------------------------------- */
 
 .saved-section { margin-top: 32px; }

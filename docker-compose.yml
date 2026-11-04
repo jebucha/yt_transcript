@@ -22,6 +22,14 @@ services:
       # the directory; a missing host directory degrades to a logged
       # best-effort failure.
       - "${TRANSCRIPTS_DIR:-/home/john/transcripts}:/transcripts"
+      # The summarization provider config (JSON). The host side is
+      # overridable via an uncommitted .env file (e.g.
+      # PROVIDERS_CONFIG=/etc/yt-transcript/providers.json), pointing at a
+      # real, key-bearing file kept out of git; the container side is fixed
+      # at the working-directory default (the app reads PROVIDERS_CONFIG
+      # inside the container, defaulting to the cwd's providers.json).
+      # Read-only: the app never writes the config.
+      - "${PROVIDERS_CONFIG:-./providers.json}:/app/providers.json:ro"
     healthcheck:
       # Probes the UI route with python — the astral/uv base image has no
       # curl, and no dedicated /health endpoint is added (design.md,

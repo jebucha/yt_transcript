@@ -118,7 +118,7 @@ The interface SHALL provide a "Show logs" button that, when clicked, makes the l
   - **Pass:** exit code 0, no skipped tests
 
 ### Requirement: Humanized log entry display
-The log panel SHALL render each received log entry as a single human-readable line showing the time, the level, and the event's key fields — not the raw JSON — for the known event types (`server_started`, `server_stopped`, `http_request`, `fetch_attempt`, `fetch_rejected`, `transcript_saved`, `transcript_save_failed`, `unhandled_exception`). For an event type without a dedicated format, the panel SHALL display the event name together with the entry's remaining fields as key=value text.
+The log panel SHALL render each received log entry as a single human-readable line showing the time, the level, and the event's key fields — not the raw JSON — for the known event types (`server_started`, `server_stopped`, `http_request`, `fetch_attempt`, `fetch_rejected`, `transcript_save_failed`, `unhandled_exception`, `summary_completed`, `summary_failed`, `summary_save_failed`, `config_load_failed`). For an event type without a dedicated format, the panel SHALL display the event name together with the entry's remaining fields as key=value text.
 
 #### Scenario: Fetch failure shown with cause
 - **WHEN** a fetch attempt fails and the log panel is visible
@@ -172,4 +172,22 @@ The log panel SHALL render each received log entry as a single human-readable li
   - **ID:** T-LOG-VIEWER-017
   - **File:** tests/e2e/test_log_viewer.py::test_markup_rendered_as_plain_text
   - **Command:** python -m pytest tests/e2e/test_log_viewer.py::test_markup_rendered_as_plain_text -q
+  - **Pass:** exit code 0, no skipped tests
+
+#### Scenario: Summary failure shown with cause
+- **WHEN** a summarization fails and the log panel is visible
+- **THEN** the panel shows a line identifying the failed summarization (provider, model) together with the failure's cause detail
+- **Test Requirement**
+  - **ID:** T-LOG-VIEWER-018
+  - **File:** tests/e2e/test_log_viewer.py::test_summary_failure_shown_with_cause
+  - **Command:** python -m pytest tests/e2e/test_log_viewer.py::test_summary_failure_shown_with_cause -q
+  - **Pass:** exit code 0, no skipped tests
+
+#### Scenario: Summary success shown
+- **WHEN** a summarization succeeds and the log panel is visible
+- **THEN** the panel shows a line identifying the completed summarization (provider, model) with its duration
+- **Test Requirement**
+  - **ID:** T-LOG-VIEWER-019
+  - **File:** tests/e2e/test_log_viewer.py::test_summary_success_shown
+  - **Command:** python -m pytest tests/e2e/test_log_viewer.py::test_summary_success_shown -q
   - **Pass:** exit code 0, no skipped tests

@@ -21,7 +21,9 @@ third-party transcript service.
   panel displays the 200 most recent lines.
 - **Error model:** `INVALID_URL` 400, `VIDEO_UNAVAILABLE` 404,
   `NO_CAPTIONS` 404, `UPSTREAM_FAILURE` 502, `BUSY` 503; the saved-transcript
-  read endpoint adds `INVALID_NAME` 400 and `NOT_FOUND` 404.
+  read endpoints add `INVALID_NAME` 400 and `NOT_FOUND` 404; summarization
+  adds `NOT_CONFIGURED` 503, `INVALID_PROVIDER` 400, `PROVIDER_ERROR` 502,
+  and `INPUT_TOO_LONG` 400.
 - **Concurrency:** at most one YouTube fetch chain at a time; a second
   concurrent request gets `503 BUSY` immediately.
 
@@ -143,6 +145,93 @@ ls -l /home/john/transcripts/    # -> one .txt file named after the video title
 Stop when done: `docker compose down` (or `podman compose down`) — removes
 the container and its network.
 
+## Summarization
+
+With one click, the UI summarizes the transcript currently displayed — a
+freshly fetched one or a saved one clicked from the library — using an
+OpenAI-compatible LLM backend of your choice. **The displayed transcript
+text is sent to the backend you configure**, so point the config at
+backends you trust (typically your own local servers).
+
+**Provider config.** The backends are listed in a JSON file — copy
+`providers.json.example` to `providers.json` and edit it to your real
+providers (or point `PROVIDERS_CONFIG` at your own file). The file is
+re-read on every request, so edits take effect without a restart. Shape:
+
+```json
+{
+  "default": "radai",
+  "provider": {
+    "radai": {
+      "name": "Radai",
+      "options": {
+        "baseURL": "http://localhost:8000/v1",
+        "apiKey": "sk-..."
+      },
+      "models": {
+        "qwen3.5": "Qwen 3.5 27B"
+      }
+    }
+  }
+}
+```
+
+- `provider` maps provider ids to entries with a display `name`,
+  `options.baseURL` (required — the OpenAI-compatible root, e.g.
+  `http://localhost:11434/v1`), an optional `options.apiKey` (omit for
+  keyless local backends), and a `models` map (its keys are the model ids,
+  shown in the picker in file order). Unknown fields are ignored.
+- `default` (optional) names the provider pre-selected in the picker;
+  without it, the first provider in the file is the default.
+- API keys and base URLs never reach the browser — the picker shows ids
+  and display names only, and the app only ever calls base URLs present in
+  the file.
+
+**Environment variables.**
+
+| Variable | Read by | Default | Meaning |
+| --- | --- | --- | --- |
+| `PROVIDERS_CONFIG` | the app (inside the container) | `providers.json` in the working directory (`/app/providers.json` in the image) | path to the provider config file |
+| `SUMMARY_TIMEOUT` | the app | `120` | backend-call timeout in seconds (connect + read), sized for local 27B-class models; raise it for slower hardware |
+
+With compose, the host-side config path is overridable through the
+uncommitted `.env` file: `PROVIDERS_CONFIG=/etc/yt-transcript/providers.json`
+bind-mounts that host file to the fixed container path `/app/providers.json`
+(read-only).
+
+**Keeping a key-bearing config out of git.** `providers.json` is
+git-ignored; the committed `providers.json.example` is a keyless sample.
+Keep your real file elsewhere (e.g.
+`/etc/yt-transcript/providers.json`) and point the host-side
+`PROVIDERS_CONFIG` at it from `.env` (git-ignored) — or, for local dev, set
+`PROVIDERS_CONFIG` in the shell when running `uv run python -m app.main`.
+
+**Behavior and limits.** Summarization runs independently of the
+transcript fetch chain (it is not subject to the single-flight `BUSY`
+limit). The transcript must be at most 100,000 characters (`INPUT_TOO_LONG`
+above that) and the output is bounded to 16384 tokens; if the model's context
+window is smaller than the transcript, the backend's HTTP error surfaces as
+`PROVIDER_ERROR`. A successful summary is saved as `<name>.summary` next to
+the transcript (best-effort — a save failure only logs
+`summary_save_failed`), stays out of the saved-transcript list (which shows
+`.txt` files only), and is re-shown when the transcript is clicked again.
+Every summarization is logged as `summary_completed` / `summary_failed`
+(structured logs and the in-browser log panel); a malformed config file
+logs `config_load_failed` and degrades to "not configured".
+
+**Error messages.** `NOT_CONFIGURED` 503 — no usable providers found in the
+config file. `INVALID_PROVIDER` 400 — the picked provider or model is no
+longer in the config (reload the page after a config edit).
+`PROVIDER_ERROR` 502 — the backend was unreachable, timed out, returned an
+HTTP error, sent a malformed response, or returned empty content (a thinking
+model can spend its whole output budget reasoning and produce nothing); please
+try again.
+`INPUT_TOO_LONG` 400 — the transcript exceeds the 100,000-character cap.
+
+**A note on keys.** If a `baseURL` is not `localhost`/loopback and the
+provider carries an `apiKey`, use `https://` so the key does not cross the
+network in the clear.
+
 ## When YouTube breaks the fetchers (library-update runbook)
 
 Both fetchers wrap unofficial YouTube endpoints; when YouTube changes its
@@ -193,6 +282,8 @@ app/            FastAPI application
   errors.py     error taxonomy (code + HTTP status + message)
   persist.py    title-to-file-name derivation + best-effort transcript writer
   library.py    read side of saved transcripts (list + read)
+  providers.py  summarization provider config (read per request)
+  summarize.py  provider invocation + summary file save/read
   log.py        structlog JSON-to-stdout setup
   logbus.py     in-memory ring buffer backing the SSE log viewer
   static/       index.html, style.css, app.js (no build step, no CDN)
