@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from queue import Empty
@@ -41,6 +43,22 @@ DEFAULT_PORT = 8000
 # poll runs in an executor thread, so a client disconnect can cancel the
 # in-flight poll instead of leaving a worker blocked in queue.get().
 LOG_POLL_TIMEOUT = 0.5
+
+# Max concurrent summarization backend calls. Each call pins a worker for up
+# to the 120 s LLM timeout, so it runs on a bounded pool of its own rather
+# than the default executor every other endpoint's blocking work shares;
+# excess in-flight requests wait for a free slot instead of being rejected.
+SUMMARIZE_MAX_CONCURRENCY = 2
+SUMMARIZE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=SUMMARIZE_MAX_CONCURRENCY, thread_name_prefix="summarize"
+)
+
+# Max request-body size in bytes (5 MiB). Checked against the declared
+# Content-Length before the body is read or parsed, so an oversized upload
+# cannot exhaust process memory. The app's real payload ceiling is the
+# 100k-char text cap (<1 MB worst case), so 5 MiB leaves wide headroom.
+# Module-level so tests can monkeypatch it.
+MAX_BODY_BYTES = 5 * 1024 * 1024
 
 
 class TranscriptRequest(BaseModel):
@@ -80,6 +98,22 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="yt-transcript", lifespan=lifespan)
     applog.install_excepthook()
+
+    # Registered before the logging middleware (Starlette applies the
+    # first-added HTTP middleware as the outermost layer) so 413 rejections
+    # are covered by the http_request log line. Header check only: the
+    # declared length is compared without reading the body, which fires
+    # before Starlette's full-body read + JSON parse.
+    @app.middleware("http")
+    async def limit_body_size(request, call_next):
+        length = request.headers.get("content-length")
+        if length is not None and length.isdigit() and int(length) > MAX_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"error": {"code": "BODY_TOO_LARGE",
+                                   "message": "Request body too large."}},
+            )
+        return await call_next(request)
 
     @app.middleware("http")
     async def log_http_requests(request, call_next):
@@ -233,10 +267,18 @@ def create_app() -> FastAPI:
                 content={"error": {"code": error.code,
                                    "message": error.message}},
             )
-        # The backend call runs in a worker thread; the endpoint never touches
-        # the fetch chain or the single-flight semaphore (design decision 9).
+        # The backend call runs in a worker thread on the dedicated bounded
+        # pool (SUMMARIZE_EXECUTOR), so in-flight LLM calls can never occupy
+        # the default executor other endpoints share; excess in-flight
+        # requests wait for a free pool slot. run_in_executor with a copied
+        # context mirrors asyncio.to_thread's semantics — this runtime's
+        # to_thread has no executor parameter (design D1 runtime note) — and
+        # the endpoint never touches the fetch chain or the single-flight
+        # semaphore (design decision 9).
         try:
-            summary = await asyncio.to_thread(
+            summary = await asyncio.get_running_loop().run_in_executor(
+                SUMMARIZE_EXECUTOR,
+                contextvars.copy_context().run,
                 summarize_mod.summarize_with_provider,
                 provider, request.model, request.text,
             )
@@ -296,7 +338,10 @@ def main() -> None:
     applog.setup_logging()
     applog.install_excepthook()
     host = os.environ.get("HOST", "0.0.0.0")
-    uvicorn.run(app, host=host, port=_listen_port(), log_level="warning")
+    # App-wide connection backpressure: while 100 connections are in flight,
+    # uvicorn itself rejects new ones with 503 (design D2).
+    uvicorn.run(app, host=host, port=_listen_port(), log_level="warning",
+                limit_concurrency=100)
 
 
 if __name__ == "__main__":

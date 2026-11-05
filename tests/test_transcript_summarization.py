@@ -7,6 +7,7 @@ unit-tested against tmp_path with a mocked HTTP layer.
 
 import io
 import json
+import time
 
 import pytest
 from starlette.testclient import TestClient
@@ -797,6 +798,103 @@ def test_summarize_during_in_flight_fetch_succeeds(api, monkeypatch):
     finally:
         release_fetch.set()
         thread.join(timeout=15)
+
+
+# --- T-TRANSCRIPT-SUMMARIZATION-041, 042: backend concurrency bound ----------
+
+
+def test_summarize_backend_concurrency_bounded(api, monkeypatch):
+    """T-TRANSCRIPT-SUMMARIZATION-041"""
+    import threading
+
+    # Tracking stub for the summarize dispatch: the endpoint sends it through
+    # the bounded pool (SUMMARIZE_EXECUTOR), so it runs at most
+    # SUMMARIZE_MAX_CONCURRENCY times concurrently.
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0, "started": 0}
+
+    def tracking_stub(provider, model, text):
+        with lock:
+            state["active"] += 1
+            state["started"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(0.2)  # long enough for all 4 requests to overlap
+        finally:
+            with lock:
+                state["active"] -= 1
+        return "The summary."
+
+    monkeypatch.setattr(summarize_mod, "summarize_with_provider", tracking_stub)
+
+    responses = []
+
+    def post_request():
+        # list.append is atomic under the GIL
+        responses.append(api["client"].post("/api/summarize", json=_valid_body()))
+
+    threads = [threading.Thread(target=post_request) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert [r.status_code for r in responses] == [200] * 4
+    assert [r.json() for r in responses] == [{"summary": "The summary."}] * 4
+    assert state["started"] == 4
+    assert state["peak"] <= 2
+
+
+def test_summarize_does_not_starve_other_endpoints(api, monkeypatch):
+    """T-TRANSCRIPT-SUMMARIZATION-042"""
+    import threading
+
+    # Delayed stub: the 2 in-flight summarize calls occupy both bounded
+    # slots for ~1 s each.
+    both_active = threading.Event()
+    lock = threading.Lock()
+    state = {"active": 0}
+
+    def delayed_stub(provider, model, text):
+        with lock:
+            state["active"] += 1
+            active = state["active"]
+        if active == 2:
+            both_active.set()
+        try:
+            time.sleep(1.0)
+        finally:
+            with lock:
+                state["active"] -= 1
+        return "The summary."
+
+    monkeypatch.setattr(summarize_mod, "summarize_with_provider", delayed_stub)
+
+    responses = []
+
+    def post_request():
+        # list.append is atomic under the GIL
+        responses.append(api["client"].post("/api/summarize", json=_valid_body()))
+
+    threads = [threading.Thread(target=post_request) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    try:
+        # both bounded slots are now busy, so the summarize calls are
+        # still in flight when the list request below runs
+        assert both_active.wait(timeout=10)
+        start = time.monotonic()
+        listing = api["client"].get("/api/transcripts")
+        elapsed = time.monotonic() - start
+        assert listing.status_code == 200
+        assert "transcripts" in listing.json()
+        # promptly: well under the summarize timeout (120 s)
+        assert elapsed < 10
+    finally:
+        for thread in threads:
+            thread.join(timeout=15)
+
+    assert [r.status_code for r in responses] == [200, 200]
 
 
 # --- T-TRANSCRIPT-SUMMARIZATION-021, 022 .. 024, 037: summary read endpoint ---
