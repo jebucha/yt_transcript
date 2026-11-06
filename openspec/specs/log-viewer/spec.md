@@ -79,7 +79,7 @@ The application SHALL continue writing every log entry to stdout as a single JSO
   - **Pass:** exit code 0, no skipped tests
 
 ### Requirement: Log panel and toggle
-The interface SHALL provide a "Show logs" button that, when clicked, makes the log panel visible; the button SHALL then read "Hide logs" and, when clicked again, hide the panel. The panel SHALL be hidden when the page first loads.
+The interface SHALL provide a "Show logs" button that, when clicked, makes the log panel visible; the button SHALL then read "Hide logs" and, when clicked again, hide the panel. The panel SHALL be hidden when the page first loads. When the panel is visible, it SHALL be displayed adjacent to the toggle — immediately beneath it — without requiring the user to scroll the page.
 
 #### Scenario: Panel hidden by default
 - **WHEN** the page loads
@@ -115,6 +115,15 @@ The interface SHALL provide a "Show logs" button that, when clicked, makes the l
   - **ID:** T-LOG-VIEWER-011
   - **File:** tests/e2e/test_log_viewer.py::test_entries_while_hidden_still_available
   - **Command:** python -m pytest tests/e2e/test_log_viewer.py::test_entries_while_hidden_still_available -q
+  - **Pass:** exit code 0, no skipped tests
+
+#### Scenario: Panel appears beneath the toggle
+- **WHEN** the user clicks "Show logs" and the log panel becomes visible
+- **THEN** the log panel is displayed immediately beneath the toggle without requiring page scrolling
+- **Test Requirement**
+  - **ID:** T-LOG-VIEWER-020
+  - **File:** tests/e2e/test_log_viewer.py::test_panel_shown_beneath_toggle
+  - **Command:** python -m pytest tests/e2e/test_log_viewer.py::test_panel_shown_beneath_toggle -q
   - **Pass:** exit code 0, no skipped tests
 
 ### Requirement: Humanized log entry display

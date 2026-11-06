@@ -31,6 +31,13 @@ body {
 
 .header {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.header-row {
+  display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
@@ -290,7 +297,7 @@ h1 {
 /* --- Log viewer ---------------------------------------------------------------- */
 
 .log-panel {
-  margin: 32px 0 0;
+  margin: 0;
   padding: 14px 16px;
   max-height: 40vh;
   overflow-y: auto;

@@ -9,11 +9,15 @@
 <body>
   <main class="container">
     <div class="header">
-      <div class="header-titles">
-        <h1>YouTube Transcript</h1>
-        <p class="subtitle">Paste a YouTube video URL to get its caption transcript.</p>
+      <div class="header-row">
+        <div class="header-titles">
+          <h1>YouTube Transcript</h1>
+          <p class="subtitle">Paste a YouTube video URL to get its caption transcript.</p>
+        </div>
+        <button id="logs-toggle" class="btn btn-quiet" type="button">Show logs</button>
       </div>
-      <button id="logs-toggle" class="btn btn-quiet" type="button">Show logs</button>
+
+      <pre id="log-panel" class="log-panel" hidden tabindex="0" aria-label="Server log"></pre>
     </div>
 
     <form id="fetch-form" class="row">
@@ -77,7 +81,6 @@
       <p id="saved-empty" class="saved-empty" hidden>No transcripts saved yet.</p>
     </section>
 
-    <pre id="log-panel" class="log-panel" hidden tabindex="0" aria-label="Server log"></pre>
   </main>
   <script src="/app.js"></script>
 </body>

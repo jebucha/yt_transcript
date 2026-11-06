@@ -1,4 +1,4 @@
-"""E2E log viewer tests (T-LOG-VIEWER-008 .. 017).
+"""E2E log viewer tests (T-LOG-VIEWER-008 .. 020).
 
 Reuses the in-process uvicorn + stub-chain harness pattern from
 test_ui.py. Synthetic log entries are emitted in-process through the app's
@@ -332,3 +332,25 @@ def test_summary_success_shown(page, server):
     assert "alpha" in line
     assert "model-a1" in line
     assert "ms" in line
+
+
+# --- T-LOG-VIEWER-020: panel placement beneath the toggle ------------------------
+
+
+def test_panel_shown_beneath_toggle(page):
+    page.click("#logs-toggle")
+
+    assert not page.locator("#log-panel").is_hidden()
+
+    toggle = page.locator("#logs-toggle")
+    panel = page.locator("#log-panel")
+    toggle_box = toggle.bounding_box()
+    panel_box = panel.bounding_box()
+    assert toggle_box is not None, "toggle should be visible when the panel is shown"
+    assert panel_box is not None, "panel should have a box once visible"
+    # Push-down placement: the panel renders as a row directly beneath the
+    # toggle (normal document flow, second header row) — never above or
+    # overlapping the toggle.
+    assert panel_box["y"] >= toggle_box["y"] + toggle_box["height"]
+    # The panel appears without requiring the user to scroll the page.
+    assert panel_box["y"] + panel_box["height"] <= page.viewport_size["height"]
