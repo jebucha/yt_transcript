@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/providers.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html" aria-current="page">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/providers.py</code> — summarization provider config</h1>
+<h2>Purpose</h2>
+<p>Reads, parses, and validates the provider config file that drives
+summarization — on <strong>every call</strong>, never at startup. The result is a plain
+structure of usable providers plus the default provider id, or the empty
+"not configured" state.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>load_providers() -&gt; ProviderConfig</code> — one config read.</li>
+<li><code>config_path() -&gt; Path</code> — resolves <code>PROVIDERS_CONFIG</code> (default
+  <code>providers.json</code> in the working directory) at call time.</li>
+<li><code>Provider</code> — frozen dataclass: <code>id</code>, <code>name</code> (display, falls back to the
+  id), <code>base_url</code>, <code>api_key</code> (optional), <code>models</code> (tuple of ids, file order).</li>
+<li><code>ProviderConfig</code> — frozen dataclass: <code>providers</code> (tuple) + <code>default</code>
+  (id or <code>None</code>).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The reader is pure over the config file path so it
+  is testable directly against <code>tmp_path</code>.</li>
+<li><strong>Read per call, never cached, never at startup.</strong> Edits take effect on
+  the next request without a restart, and the app boots with no config at
+  all.</li>
+<li><strong>Missing file is the normal "not configured" state</strong> — an empty result
+  with <em>no</em> log entry. An unreadable file, malformed JSON, a malformed
+  structure, or a file with no usable provider all return the empty result
+  <strong>without raising</strong>, and additionally log one <code>config_load_failed</code> error
+  event carrying the path and the parse error detail.</li>
+<li><strong>A provider is usable only with a non-empty string <code>options.baseURL</code> and
+  a non-empty <code>models</code> map</strong> (its keys are the model ids, in JSON file
+  order). Unknown fields are ignored; a missing/empty display name falls
+  back to the provider id; <code>apiKey</code> may be absent (keyless local backends).</li>
+<li><strong><code>default</code> resolution:</strong> an explicit top-level <code>"default"</code> key wins when
+  it names a usable provider; otherwise the first provider in file order;
+  otherwise <code>None</code>.</li>
+<li><strong>Secrets never leave this module's memory in logs.</strong> The <code>detail</code> of a
+  failed load is the parse error only — never the file's contents.</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>config_load_failed</code> (error): <code>path</code>, <code>reason</code>
+  (<code>invalid_json</code>, <code>invalid_structure</code>, or the OS exception type name),
+  <code>detail</code> (the parse error — never file contents).</li>
+</ul>
+<h2>Error codes raised/handled</h2>
+<p>None raised — all failures degrade to the empty <code>ProviderConfig</code>; the
+endpoint turns that into <code>NOT_CONFIGURED</code> 503.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>add-transcript-summary</code>:</p>
+<ul>
+<li><strong>decision 2</strong> — module layout: FastAPI-free config reader, plain
+  structure, zero FastAPI import leakage.</li>
+<li><strong>decision 3</strong> — config read per request, never at startup: boot
+  without config, hot-reload edits, tiny file so per-request reads are
+  negligible. (An explicit <code>PROVIDERS_CONFIG</code> pointing at a host file is the
+  compose deployment shape from <strong>decision 12</strong>.)</li>
+<li><strong>decision 13</strong> — logging discipline: parse error detail only, never file
+  contents; a missing file is not a logged failure.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="summarize.html"><code>summarize.py</code></a> — consumes <code>Provider</code> for the backend call</li>
+<li><a href="main.html"><code>main.py</code></a> — <code>GET /api/providers</code> (secret-free listing) and the per-request reads</li>
+<li><a href="errors.html"><code>errors.py</code></a> — <code>NOT_CONFIGURED</code> / <code>INVALID_PROVIDER</code></li>
+</ul>
+</main>
+</body>
+</html>

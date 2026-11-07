@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/log.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html" aria-current="page">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/log.py</code> — structured JSON logging setup</h1>
+<h2>Purpose</h2>
+<p>Configures structlog so that every log entry is one JSON object on one line
+of stdout: <code>{"timestamp": "&lt;ISO-8601 UTC&gt;", "level": "&lt;level&gt;",
+"event": "&lt;name&gt;", ...}</code>. It also provides the lazy logger accessor and an
+optional sys.excepthook that turns unhandled exceptions into an error event.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>setup_logging(stream=None)</code> — configures structlog (idempotent by design:
+  it simply reconfigures). With no stream, it installs a <code>TeeStream</code> in
+  front of stdout that mirrors rendered JSON entries into
+  <code>logbus.DEFAULT_BUS</code> for the in-browser log viewer; an explicitly passed
+  stream (tests) is used as-is and never touches the bus.</li>
+<li><code>get_logger()</code> — returns a structlog logger bound to the <em>current</em>
+  configuration; call it lazily, never at module import time.</li>
+<li><code>install_excepthook()</code> — installs the unhandled-exception hook,
+  idempotent.</li>
+<li><code>exception_hook(exc_type, exc, tb)</code> — logs <code>unhandled_exception</code> (error,
+  with <code>exc_info</code>), then keeps the interpreter's default behaviour
+  (traceback on stderr, non-zero exit).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>stdout is the only log output destination.</strong> No file handlers are ever
+  installed; the in-memory bus mirror is internal state, not an output
+  (that's what keeps the structured-logging spec's "stdout only" rule true).</li>
+<li><strong>One JSON object per line</strong>, <code>ensure_ascii=False</code>, with ISO-8601 UTC
+  timestamps under the key <code>timestamp</code>.</li>
+<li><strong>The log level floor is INFO</strong> (<code>make_filtering_bound_logger</code>) — nothing
+  below INFO is ever emitted.</li>
+<li><strong>Loggers are created lazily.</strong> <code>get_logger()</code> at import time would bind
+  to the import-time configuration and defeat tests' reconfiguration; every
+  module fetches its logger at call time.</li>
+<li><strong>The default tee resolves <code>sys.stdout</code> at write time</strong> (see <code>logbus.py</code>)
+  — never a captured or <code>sys.__stdout__</code> handle — which is what makes the
+  capsys-based test streams work.</li>
+<li><strong>The excepthook adds, never replaces:</strong> after logging, it delegates to
+  <code>sys.__excepthook__</code>, and installation is idempotent.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None of its own — it is the <em>plumbing</em> for every other module's events.
+The one event associated with this module is <code>unhandled_exception</code> (error),
+emitted by the hook when an exception escapes the interpreter.</p>
+<h2>Error codes raised/handled</h2>
+<p>None — this module raises nothing and handles no domain errors.</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-29-youtube-transcript</code> <strong>D8</strong> — structlog (tiny, pure Python)
+  configured for one JSON object per line with <code>timestamp</code>/<code>level</code>/<code>event</code>;
+  no file handlers; a top-level handler turns unhandled exceptions into an
+  error event.</li>
+<li><code>2026-11-03-add-log-viewer</code> <strong>decision 2</strong> — the delivery seam: a tee
+  stream in front of stdout (rather than a processor or a logging handler)
+  so <code>log.py</code>'s public shape is unchanged, explicit test streams still
+  bypass the bus, and "stdout is still written" is structurally obvious.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="logbus.html"><code>logbus.py</code></a> — the <code>TeeStream</code> target and the SSE source</li>
+<li><a href="main.html"><code>main.py</code></a> — where <code>setup_logging</code> / <code>install_excepthook</code> are invoked</li>
+<li><a href="__init__.html"><code>__init__.py</code></a> — the package conventions this module serves</li>
+</ul>
+</main>
+</body>
+</html>

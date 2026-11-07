@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dockerfile — yt-transcript code docs</title>
+<link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="../index.html">index</a></li>
+  <li><a href="../__init__.html">app/__init__.py</a></li>
+  <li><a href="../main.html">app/main.py</a></li>
+  <li><a href="../chain.html">app/chain.py</a></li>
+  <li><a href="../fetchers.html">app/fetchers.py</a></li>
+  <li><a href="../urls.html">app/urls.py</a></li>
+  <li><a href="../errors.html">app/errors.py</a></li>
+  <li><a href="../persist.html">app/persist.py</a></li>
+  <li><a href="../library.html">app/library.py</a></li>
+  <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../log.html">app/log.py</a></li>
+  <li><a href="../logbus.html">app/logbus.py</a></li>
+  <li><a href="../static/app-js.html">app/static/app.js</a></li>
+  <li><a href="../static/index-html.html">app/static/index.html</a></li>
+  <li><a href="../static/style-css.html">app/static/style.css</a></li>
+  <li><a href="Dockerfile.html" aria-current="page">Dockerfile</a></li>
+  <li><a href="compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="../providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>Dockerfile</code> — single-stage podman-compatible image</h1>
+<h2>Purpose</h2>
+<p>The build definition for the yt-transcript container image: a single-stage
+image (~251 MB as measured on arm64; size varies by architecture) built from
+<code>astral/uv:python3.13-bookworm-slim</code>, running the app as an unprivileged user
+with no dev dependencies installed. Designed
+for podman parity — works identically under <code>docker build</code> and <code>podman build</code>.</p>
+<h2>Public surface</h2>
+<ul>
+<li><strong>Base image:</strong> <code>astral/uv:python3.13-bookworm-slim</code> (Python 3.13, uv pre-installed)</li>
+<li><strong>Environment variables set in the image:</strong></li>
+<li><code>PYTHONDONTWRITEBYTECODE=1</code> — disable .pyc generation in the container</li>
+<li><code>PYTHONUNBUFFERED=1</code> — stdout flushes immediately (critical for log streaming)</li>
+<li><code>PORT=8000</code>, <code>HOST=0.0.0.0</code> — uvicorn defaults, overridable at runtime</li>
+<li><code>TRANSCRIPT_DIR=/transcripts</code> — absolute path where transcripts are written</li>
+<li><strong>Exposed port:</strong> <code>8000/tcp</code> (HTTP)</li>
+<li><strong>Entry point:</strong> <code>CMD ["uv", "run", "--frozen", "--no-dev", "python", "-m", "app.main"]</code></li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Single-stage only.</strong> No multi-build, no build args, no cache mounts — the
+  Dockerfile must work under podman which has limited BuildKit support.</li>
+<li><strong>Layer cache discipline.</strong> Dependencies are copied and installed <em>before</em> the
+  application code (<code>COPY pyproject.toml uv.lock .</code> then <code>uv sync --frozen --no-dev</code>,
+  then <code>COPY app ./app</code>). Changing only source code does not invalidate the
+  dependency install layer.</li>
+<li><strong><code>--no-dev</code> in both build and runtime.</strong> The dev dependency group (pytest,
+  playwright, markdown) is never installed — the image contains only runtime
+  dependencies from the main group. This matches the compose healthcheck and log
+  rotation that assume a minimal container footprint.</li>
+<li><strong>Unprivileged user.</strong> <code>appuser</code> owns <code>/app</code>; no root operations after useradd.
+  The UID/GID assignment at build time is deterministic.</li>
+<li><strong>Start-up under 1 second</strong> (measured on typical VPS hardware). The image has
+  no warmup dependencies — the app starts immediately when the container runs.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>N/A — this file emits nothing. However, it configures the runtime environment
+that controls logging behavior: <code>PYTHONUNBUFFERED=1</code> ensures log lines flush to
+stdout on every write, which is essential for the SSE log viewer and Docker's
+<code>docker logs</code> output. Without it, buffered writes would make real-time log
+streaming impossible.</p>
+<h2>Error codes raised/handled</h2>
+<p>Failure modes during build or runtime:
+- <strong>Missing <code>uv.lock</code></strong> — build fails with an exit error (pinned dependencies are mandatory)
+- <strong>Non-podman BuildKit features used</strong> — podman may reject the build; kept to
+  POSIX-compatible Dockerfile syntax only
+- <strong>Port already in use at runtime</strong> — uvicorn exits with EADDRINUSE; the app
+  has no retry logic for this</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-10-29-add-docker-compose</code> (archived design doc):
+- The base image choice (<code>astral/uv:python3.13-bookworm-slim</code>) replaces the original
+  <code>python:3.13-slim</code> — uv is available natively, no separate pip install step needed
+- <code>--frozen</code> flag in both build and runtime ensures bit-for-bit reproducibility</p>
+<p>Also from later changes:
+- <code>add-transcript-summary</code> decision on provider config mount path compatibility with the image's <code>/app</code> working directory
+- <code>2026-10-30-migrate-to-uv</code> — uv is now the dependency manager, reflected in the sync command</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="compose-yml.html"><code>docker-compose.yml</code></a> — builds this Dockerfile (<code>build: .</code>)</li>
+<li><a href="../main.html"><code>app/main.py</code></a> — CMD entry point; <code>create_app()</code> + <code>main()</code></li>
+<li>README.md → Deployment section (podman commands, runtime config)</li>
+</ul>
+</main>
+</body>
+</html>

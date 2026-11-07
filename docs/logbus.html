@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/logbus.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html" aria-current="page">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/logbus.py</code> — in-memory log bus</h1>
+<h2>Purpose</h2>
+<p>Backs the in-browser log viewer: a bounded ring buffer with subscriber
+fan-out. <code>TeeStream</code> (installed as the default logging stream by
+<code>app.log.setup_logging</code>) publishes every rendered JSON log entry to the
+module-level <code>DEFAULT_BUS</code>, and the SSE clients of <code>GET /api/logs</code> subscribe
+for live delivery plus a bounded history replay.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>LogBus</code> — <code>publish(entry)</code>, <code>snapshot() -&gt; list[dict]</code> (oldest→newest),
+  <code>subscribe() -&gt; Queue</code>, <code>unsubscribe(q)</code> (idempotent).</li>
+<li><code>TeeStream</code> — a stream in front of stdout for structlog's
+  <code>PrintLoggerFactory</code>.</li>
+<li><code>DEFAULT_BUS</code> — the single bus the default tee publishes to and
+  <code>/api/logs</code> streams from.</li>
+<li>Constants: <code>BUFFER_SIZE</code> (200 — the replay cap), <code>SUBSCRIBER_QUEUE_SIZE</code>
+  (256 — the per-subscriber fan-out bound).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Internal state only.</strong> The bus is never a log output destination and
+  never writes to a file — the structured-logging spec's "stdout is the only
+  log output" holds with or without subscribers.</li>
+<li><strong>All thread-safety lives here.</strong> Log calls arrive from worker threads and
+  the event loop; every mutation is guarded by one lock, and entry order in
+  the buffer matches log-call order because <code>publish</code> is serialized.</li>
+<li><strong><code>publish</code> never blocks.</strong> A subscriber whose queue is full drops the
+  entry — a slow or dead consumer can never stall the logging path.</li>
+<li><strong><code>TeeStream</code> resolves the <em>current</em> <code>sys.stdout</code> at write time</strong> — never
+  a captured or <code>sys.__stdout__</code> handle — so test streams (capsys) keep
+  working. Only lines that parse as a JSON <em>dict</em> are published; everything
+  else passes through to stdout unmodified.</li>
+<li><strong>Bounded memory, both ends.</strong> The ring buffer is a <code>deque(maxlen=200)</code>;
+  the client panel mirrors the 200-line cap.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None — it <em>carries</em> every other module's events. It does not log.</p>
+<h2>Error codes raised/handled</h2>
+<p>None — it raises nothing; <code>Full</code> queues are swallowed by design.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-11-03-add-log-viewer</code>:</p>
+<ul>
+<li><strong>decision 1</strong> — the transport is server-sent events (one-way, instant,
+  dependency-free) rather than polling or WebSocket.</li>
+<li><strong>decision 2</strong> — the delivery seam: a tee stream in front of stdout
+  (alternatives — a structlog processor or a logging handler — were
+  rejected; the stream seam is where the app already plugs in test streams).</li>
+<li><strong>decision 3</strong> — thread-safe fan-out: one lock, per-subscriber
+  <code>queue.Queue</code>, drop-on-full, unsubscribe on generator exit.</li>
+<li><strong>decision 4</strong> — replay on connect: subscribe <em>before</em> snapshotting so an
+  entry logged between the two is not lost on the first connect.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="log.html"><code>log.py</code></a> — installs the <code>TeeStream</code> as the default stream</li>
+<li><a href="main.html"><code>main.py</code></a> — the <code>GET /api/logs</code> endpoint that streams <code>DEFAULT_BUS</code></li>
+<li><a href="static/app-js.html"><code>static/app-js.html</code></a> — the in-browser panel that consumes the stream</li>
+</ul>
+</main>
+</body>
+</html>

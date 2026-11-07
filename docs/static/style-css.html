@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/static/style.css — yt-transcript code docs</title>
+<link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="../index.html">index</a></li>
+  <li><a href="../__init__.html">app/__init__.py</a></li>
+  <li><a href="../main.html">app/main.py</a></li>
+  <li><a href="../chain.html">app/chain.py</a></li>
+  <li><a href="../fetchers.html">app/fetchers.py</a></li>
+  <li><a href="../urls.html">app/urls.py</a></li>
+  <li><a href="../errors.html">app/errors.py</a></li>
+  <li><a href="../persist.html">app/persist.py</a></li>
+  <li><a href="../library.html">app/library.py</a></li>
+  <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../log.html">app/log.py</a></li>
+  <li><a href="../logbus.html">app/logbus.py</a></li>
+  <li><a href="app-js.html">app/static/app.js</a></li>
+  <li><a href="index-html.html">app/static/index.html</a></li>
+  <li><a href="style-css.html" aria-current="page">app/static/style.css</a></li>
+  <li><a href="../deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="../deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="../providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/static/style.css</code> — the stylesheet</h1>
+<h2>Purpose</h2>
+<p>The single self-contained stylesheet for the UI: the design tokens
+(custom properties on <code>:root</code>), the page layout, and the class styles for
+every region <code>app.js</code> drives. No web fonts, no CDN, no external references
+of any kind — the app's no-CDN constraint applies to CSS as firmly as to JS.</p>
+<h2>Public surface</h2>
+<p>Design tokens: <code>--bg</code>, <code>--panel</code>, <code>--text</code>, <code>--muted</code>, <code>--accent</code>,
+<code>--accent-dark</code>, <code>--error-*</code>, <code>--border</code>. Class/element contract with
+<code>index.html</code> / <code>app.js</code>: <code>.container</code> (the single 760px column),
+<code>.header</code> / <code>.header-row</code>, <code>.row</code>, <code>.url-input</code>, <code>.btn</code> / <code>.btn-quiet</code>,
+<code>.spinner</code>, <code>.error-banner</code>, <code>.result-*</code>, <code>.video-title</code>,
+<code>.video-language</code>, <code>.transcript-panel</code>, <code>.provider-picker</code>, <code>.summary-*</code>,
+<code>.saved-*</code> (<code>.saved-row</code> is the button-styled list item), <code>.log-panel</code>.</p>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Self-contained.</strong> No <code>@import</code>, no web fonts, no external URLs; the
+  font stacks are the system stack for text and <code>ui-monospace</code>/Menlo/Consolas
+  for the log panel and transcript pre blocks.</li>
+<li><strong><code>[hidden] { display: none !important; }</code> is load-bearing.</strong> It keeps the
+  <code>hidden</code> attribute authoritative even for styled elements (buttons and
+  panels with display rules), so <code>app.js</code>'s visibility contract can never be
+  silently defeated by a class.</li>
+<li><strong>The header is a column of rows</strong> (<code>flex-direction: column</code>,
+  <code>align-items: stretch</code>): titles + toggle in the first row (<code>.header-row</code>,
+  <code>space-between</code>), the log panel as the second row. Spacing between rows
+  comes from the column's <code>gap</code>, not from the panel's <code>margin-top</code> — the
+  panel sits close beneath the toggle when opened and contributes no height
+  when hidden.</li>
+<li><strong>Every long region scrolls internally with a bounded height:</strong> the
+  transcript panel <code>max-height: 60vh</code>, the summary text and saved list
+  <code>40vh</code>, the log panel <code>40vh</code> — opening any of them never grows the page
+  without bound.</li>
+<li><strong>Buttons are keyboard- and state-honest:</strong> <code>.btn:disabled</code> dims and
+  forbids; <code>.saved-row</code> keeps <code>:focus-visible</code> outlines; hover states apply
+  only to <code>:not(:disabled)</code>.</li>
+<li><strong>Long content wraps, never overflows:</strong> <code>overflow-wrap: anywhere</code> on
+  titles, transcript, saved names, and the log panel.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None (markup-adjacent styles only).</p>
+<h2>Error codes raised/handled</h2>
+<p>None.</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-29-youtube-transcript</code> <strong>D6</strong> — the no-build, no-CDN front-end
+  constraint this file obeys.</li>
+<li><code>2026-11-02-add-saved-transcript-list</code> <strong>decision 6</strong> — the saved section's
+  treatment: bounded scrollable <code>&lt;ul&gt;</code> matching the existing
+  <code>.transcript-panel</code> treatment, button-styled rows, the cosmetic
+  <code>text-transform: capitalize</code> on <code>.saved-name</code> (accepted trade-off:
+  acronym-like words are lowercased cosmetically; the real name is always
+  what is requested and downloaded).</li>
+<li><code>2026-11-06-move-log-panel-into-header</code> <strong>D2/D3</strong> — the column-of-rows
+  header (<code>align-items: stretch</code> so rows span the full width) and the
+  row-gap spacing that replaced the old <code>.log-panel { margin: 32px 0 0; }</code>.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="index-html.html"><code>index.html</code></a> — the markup it styles</li>
+<li><a href="app-js.html"><code>app.js</code></a> — the script that toggles the classes and <code>hidden</code></li>
+</ul>
+</main>
+</body>
+</html>

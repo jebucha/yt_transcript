@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/library.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html" aria-current="page">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/library.py</code> — transcript library (read side)</h1>
+<h2>Purpose</h2>
+<p>Read-only companions to the persistence (write) capability in <code>persist.py</code>:
+list the transcript directory and read one saved transcript back byte-for-
+byte. It is the backend for the UI's "Saved transcripts" section and its
+Download button.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>list_transcripts() -&gt; list[dict]</code> — one entry per <code>.txt</code> regular file as
+  <code>{"name", "size", "modified"}</code> (size in bytes, <code>modified</code> an ISO 8601 UTC
+  string), sorted most-recent-first.</li>
+<li><code>read_transcript(name) -&gt; tuple[bool, str]</code> — <code>(ok, text)</code> where <code>text</code>
+  is the file's exact UTF-8 content.</li>
+<li><code>is_structurally_invalid_name(name) -&gt; bool</code> — the hard traversal-reject
+  rule, exported so every <code>{name}</code> endpoint applies it before filesystem
+  access.</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The helpers are pure over
+  <code>persist.transcript_dir()</code> so read and write can never disagree on the
+  directory, and are testable directly against <code>tmp_path</code>.</li>
+<li><strong>Best-effort and side-effect-free.</strong> A missing directory, a non-directory
+  path, or any listing failure degrades to <code>[]</code> — the read side never
+  creates the directory and never reports these conditions as errors. Reads
+  never create, modify, or delete anything.</li>
+<li><strong>Structural reject is checked on the raw string, before any filesystem
+  access.</strong> True for an empty name, <code>.</code> or <code>..</code>, any <code>/</code> or <code>\</code> separator,
+  or any <code>..</code> path component. This is the hard HTTP 400 rule; it guarantees a
+  structurally invalid name can never be mapped to a 404.</li>
+<li><strong>Full validation order in <code>read_transcript</code>:</strong> structural reject →
+  must end in <code>.txt</code> → resolve-and-contain (<code>Path.resolve()</code> +
+  <code>is_relative_to</code> against the resolved directory) → regular-file check.
+  Steps 3–4 are belt-and-braces (a symlink planted by the host owner is out
+  of the threat model — that owner can already read the directory directly).</li>
+<li><strong>The write side's name-safety guarantee is <em>not</em> relied on.</strong> The read
+  side defends itself because its input is client-supplied.</li>
+<li><strong>Listing stats every file on each call</strong> — no cache; the directory is
+  expected to hold dozens of files, and <code>stat.S_ISREG</code> filtering plus
+  <code>entry.stat()</code> (symlink-following, vanished entries skipped) keep it
+  accurate.</li>
+<li><strong>Server-side sorting.</strong> Most-recent-first is done here; the UI never
+  re-sorts. Equal mtimes may order arbitrarily (filesystem granularity).</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None — the read endpoints are quiet, low-frequency operator reads
+(deliberate non-goal of the change that introduced them).</p>
+<h2>Error codes raised/handled</h2>
+<p>None raised — it returns <code>(ok, text)</code>; the endpoint maps a structural reject
+to plain-HTTP 400 <code>INVALID_NAME</code> and a miss to 404 <code>NOT_FOUND</code> (deliberately
+outside the <code>errors.py</code> taxonomy).</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-11-02-add-saved-transcript-list</code>:</p>
+<ul>
+<li><strong>decision 1</strong> — a new FastAPI-free module with pure helpers, reusing
+  <code>persist.transcript_dir()</code>.</li>
+<li><strong>decision 3</strong> — traversal defense in two layers: structural reject
+  (client input, hard 400) + resolve-and-contain (belt-and-braces).</li>
+<li><strong>decision 4</strong> — filesystem work via <code>asyncio.to_thread</code>; plain-HTTP
+  status mapping; the endpoints never touch the single-flight semaphore.</li>
+<li><strong>decision 5</strong> — an unusable directory degrades to an empty list, never an
+  error.</li>
+<li><strong>decision 7</strong> — the API shape: envelope object for the list
+  (<code>{"transcripts": [...]}</code>), <code>modified</code> as ISO 8601 UTC from the file mtime,
+  server-side sorting.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="persist.html"><code>persist.py</code></a> — the write side it reads from</li>
+<li><a href="main.html"><code>main.py</code></a> — the <code>GET /api/transcripts*</code> endpoints</li>
+<li><a href="summarize.html"><code>summarize.py</code></a> — <code>read_summary</code> follows the same read-side discipline</li>
+<li><a href="static/app-js.html"><code>static/app-js.html</code></a> — the UI list that consumes this API</li>
+</ul>
+</main>
+</body>
+</html>

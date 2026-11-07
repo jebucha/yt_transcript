@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/main.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html" aria-current="page">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/main.py</code> — FastAPI application</h1>
+<h2>Purpose</h2>
+<p>The web layer: the app factory, HTTP middleware, all API endpoints, the
+static-UI mount, and the <code>python -m app.main</code> entry point. It wires together
+the fetch chain, persistence, library, providers, summarization, and logging
+modules without containing their logic — endpoint bodies are thin dispatchers
+that map module results onto JSON responses.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>create_app() -&gt; FastAPI</code> — builds the app (lifespan, middleware, routes).</li>
+<li><code>app</code> — module-level instance; the ASGI object for <code>uvicorn app.main:app</code>.</li>
+<li><code>main()</code> — the production entry point (Docker <code>CMD</code>): re-sets up logging,
+  installs the exception hook, runs uvicorn with <code>limit_concurrency=100</code>.</li>
+<li>Request models: <code>TranscriptRequest</code> (<code>url</code>), <code>SummarizeRequest</code>
+  (<code>text</code>, <code>name</code>, <code>provider</code>, <code>model</code>).</li>
+<li>Constants: <code>MAX_BODY_BYTES</code> (5 MiB, monkeypatchable in tests),
+  <code>SUMMARIZE_MAX_CONCURRENCY</code> / <code>SUMMARIZE_EXECUTOR</code>, <code>LOG_POLL_TIMEOUT</code>,
+  <code>_listen_port()</code>.</li>
+<li>Endpoints: <code>POST /api/transcript</code>, <code>GET /api/transcripts</code>,
+  <code>GET /api/transcripts/{name}</code>, <code>GET /api/transcripts/{name}/summary</code>,
+  <code>GET /api/providers</code>, <code>POST /api/summarize</code>, <code>GET /api/logs</code> (SSE), and
+  the static UI mounted at <code>/</code>.</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Import-time setup once.</strong> <code>setup_logging()</code> runs at import so every entry
+  point (uvicorn, <code>python -m app.main</code>, tests) emits the same JSON format;
+  loggers are created lazily via <code>get_logger()</code>, so tests can reconfigure
+  afterwards.</li>
+<li><strong>Middleware order is meaningful.</strong> The body-size limit is added <em>before</em>
+  the request-logging middleware (Starlette runs first-added outermost), so a
+  413 rejection still produces an <code>http_request</code> log line. The body-size check
+  reads only the <code>Content-Length</code> header — it fires before any body is read.</li>
+<li><strong>No blocking I/O on the event loop.</strong> Every filesystem or network call is
+  dispatched with <code>asyncio.to_thread</code>, <em>except</em> the summarization backend
+  call, which runs on the dedicated 2-worker <code>SUMMARIZE_EXECUTOR</code>
+  (<code>loop.run_in_executor</code> with <code>contextvars.copy_context().run</code>) so slow LLM
+  calls never occupy the default executor shared by every other endpoint.</li>
+<li><strong>Read endpoints never touch the fetch chain or its semaphore.</strong> Listing,
+  reading transcripts/summaries, listing providers, and streaming logs are
+  all independent of in-flight fetches.</li>
+<li><strong>Provider config is read per request</strong> (never at startup); the
+  <code>GET /api/providers</code> response is secret-free — API keys and base URLs never
+  leave the server.</li>
+<li><strong>Structural name reject (400 <code>INVALID_NAME</code>) is applied before any
+  filesystem access</strong> on every <code>{name}</code> route; a plain miss is a 404.</li>
+<li><strong>Static mount is registered last</strong> so the API routes take precedence.</li>
+<li><strong>Persistence and summary saves are best-effort and post-response:</strong>
+  failures are logged, never returned to the client. The fetch response
+  always carries the derived <code>name</code> (computed, not read back from disk).</li>
+</ul>
+<h2>Log events emitted</h2>
+<p><code>server_started</code> (info, with port), <code>server_stopped</code> (info),
+<code>http_request</code> (info; error at 500 with a re-raise),
+<code>unhandled_exception</code> (error, via the excepthook from <code>log.py</code>).</p>
+<h2>Error codes raised/handled</h2>
+<p>Catches <code>TranscriptError</code> from the chain and summarize modules and maps each
+to its <code>status</code>/<code>code</code>/<code>message</code> JSON envelope. Additionally returns
+<code>413 BODY_TOO_LARGE</code> (body-size middleware), <code>400 INVALID_NAME</code>, and
+<code>404 NOT_FOUND</code> (plain HTTP, not taxonomy entries).</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-29-youtube-transcript</code> D2 (FastAPI as the web layer), D8
+  (structlog JSON logging, request/lifecycle/unhandled-exception events).</li>
+<li><code>2026-10-30-add-transcript-persistence</code> decisions 1, 4, 5 — the persistence
+  hook sits in the endpoint after a successful fetch; the write is
+  best-effort (logged, never raised); it runs in a worker thread with plain
+  overwrite.</li>
+<li><code>2026-11-02-add-saved-transcript-list</code> decision 3 (step 1) — the structural
+  reject is the hard 400 rule applied before filesystem access.</li>
+<li><code>add-transcript-summary</code> decisions 3 (config read per request), 4
+  (displayed text is the source of truth), 5 (fetch response carries the
+  derived <code>name</code>), 6 (best-effort summary save), 7 (secret-free provider
+  listing), 8 (validation order on <code>POST /api/summarize</code>), 9 (no new locking;
+  fetch chain untouched).</li>
+<li><code>2026-11-03-add-log-viewer</code> decisions 2–4 — the SSE log stream over the
+  in-memory bus (tee stream, subscribe-before-snapshot replay, bounded poll).</li>
+<li><code>2026-11-05-bound-summarize-and-body-size</code> D1 (bounded summarize executor,
+  including the runtime note on why <code>run_in_executor</code> instead of
+  <code>to_thread(executor=...)</code>), D2 (<code>limit_concurrency=100</code> in <code>main()</code>), D3
+  (5 MiB <code>Content-Length</code> cap as outermost middleware).</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="chain.html"><code>chain.py</code></a> — the fetch chain this module drives</li>
+<li><a href="errors.html"><code>errors.py</code></a> — the error taxonomy it maps to HTTP</li>
+<li><a href="persist.html"><code>persist.py</code></a> / <a href="library.html"><code>library.py</code></a> — write and read side of transcripts</li>
+<li><a href="providers.html"><code>providers.py</code></a> / <a href="summarize.html"><code>summarize.py</code></a> — the summarization feature</li>
+<li><a href="log.html"><code>log.py</code></a> / <a href="logbus.html"><code>logbus.py</code></a> — logging setup and the SSE source</li>
+<li><a href="static/app-js.html"><code>app/static/app.js</code></a> — the UI that consumes these endpoints</li>
+</ul>
+</main>
+</body>
+</html>

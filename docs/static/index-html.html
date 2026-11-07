@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/static/index.html — yt-transcript code docs</title>
+<link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="../index.html">index</a></li>
+  <li><a href="../__init__.html">app/__init__.py</a></li>
+  <li><a href="../main.html">app/main.py</a></li>
+  <li><a href="../chain.html">app/chain.py</a></li>
+  <li><a href="../fetchers.html">app/fetchers.py</a></li>
+  <li><a href="../urls.html">app/urls.py</a></li>
+  <li><a href="../errors.html">app/errors.py</a></li>
+  <li><a href="../persist.html">app/persist.py</a></li>
+  <li><a href="../library.html">app/library.py</a></li>
+  <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../log.html">app/log.py</a></li>
+  <li><a href="../logbus.html">app/logbus.py</a></li>
+  <li><a href="app-js.html">app/static/app.js</a></li>
+  <li><a href="index-html.html" aria-current="page">app/static/index.html</a></li>
+  <li><a href="style-css.html">app/static/style.css</a></li>
+  <li><a href="../deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="../deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="../providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/static/index.html</code> — the single static page</h1>
+<h2>Purpose</h2>
+<p>The entire web UI's markup: one page, no framework, no build step, no CDN.
+It defines the DOM contract that <code>app.js</code> consumes — every id the script
+reaches for — and the visible structure: header (with the log viewer), the
+fetch form, the error banner, the result section (transcript panel +
+summary panel), and the saved-transcripts section.</p>
+<h2>Public surface</h2>
+<p>The asset set is exactly three files referenced with absolute paths:
+<code>/style.css</code>, <code>/app.js</code>, and this page (served by the static mount at <code>/</code>).
+The effective API is the id/class contract with <code>app.js</code>:</p>
+<ul>
+<li>Fetch flow: <code>url-input</code>, <code>fetch-form</code>, <code>fetch-btn</code>, <code>fetch-spinner</code>,
+  <code>fetch-label</code>.</li>
+<li>Result: <code>error-banner</code>, <code>result</code>, <code>video-title</code>, <code>video-language</code>,
+  <code>transcript-panel</code>, <code>copy-btn</code>, <code>download-btn</code>.</li>
+<li>Summarization: <code>provider-picker</code>, <code>summarize-btn</code>, <code>summarize-spinner</code>,
+  <code>summary-panel</code>, <code>summary-text</code>, <code>summary-copy-btn</code>.</li>
+<li>Saved list: <code>saved-list</code>, <code>saved-empty</code>, <code>saved-count</code>,
+  <code>saved-refresh-btn</code>.</li>
+<li>Log viewer: <code>logs-toggle</code>, <code>log-panel</code>.</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No build step, no framework, no CDN.</strong> The file is hand-maintained
+  markup; anything requiring a transpiler or a third-party script is
+  off-limits for this app.</li>
+<li><strong>The <code>hidden</code> attribute is the visibility contract</strong>, and the CSS rule
+  <code>[hidden] { display: none !important; }</code> in <code>style.css</code> keeps it
+  authoritative even for styled elements. <code>app.js</code> toggles only <code>hidden</code>.</li>
+<li><strong>The log panel lives in the header, as the header's second row</strong> — not
+  at the bottom of the page flow — so opening it never requires scrolling.
+  The header is a column of rows (titles + toggle on the first row, panel
+  on the second), with row gap providing the spacing.</li>
+<li><strong>Accessibility is structural, not script-added:</strong> <code>role="alert"</code> on the
+  error banner, <code>aria-label</code>s on the input, panels, and provider picker,
+  <code>tabindex="0"</code> on the scrollable <code>&lt;pre&gt;</code> panels, <code>type="button"</code> on
+  non-submit buttons, <code>aria-hidden</code> on the spinners.</li>
+<li><strong>Buttons start disabled where <code>app.js</code> requires it</strong> (copy, download,
+  summarize, the provider picker); the script enables them as state allows.</li>
+<li><strong>The result section is hidden until the first transcript</strong> — fresh fetch
+  and saved-row display both render into this same single panel.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None (markup). The <code>log-panel</code> <code>&lt;pre&gt;</code> is where <code>app.js</code> appends the
+humanized server log lines.</p>
+<h2>Error codes raised/handled</h2>
+<p>None (markup). The <code>error-banner</code> element is where <code>app.js</code> surfaces them.</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-29-youtube-transcript</code> <strong>D6</strong> — one static page served by
+  FastAPI's <code>StaticFiles</code>; no framework, no bundler, no CDN.</li>
+<li><code>2026-11-02-add-saved-transcript-list</code> <strong>decision 6</strong> — the saved section
+  below <code>#result</code>: header over a bounded, scrollable <code>&lt;ul&gt;</code>, rows as
+  keyboard-accessible <code>&lt;button&gt;</code>s.</li>
+<li><code>2026-11-03-add-log-viewer</code> <strong>decision 6</strong> — the <code>#logs-toggle</code> button and
+  the <code>#log-panel</code> <code>&lt;pre&gt;</code> (monospace, scrollable, bounded max-height).</li>
+<li><code>2026-11-06-move-log-panel-into-header</code> <strong>D1–D3</strong> — push-down placement in
+  the header (normal document flow, not an overlay), the column-of-rows
+  header with <code>align-items: stretch</code>, and row-gap spacing replacing the old
+  <code>margin-top</code> while the panel keeps its <code>max-height: 40vh</code> internal scroll.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="app-js.html"><code>app.js</code></a> — the script that owns the behavior</li>
+<li><a href="style-css.html"><code>style.css</code></a> — the stylesheet that owns the look</li>
+<li><a href="../main.html"><code>main.html</code></a> — the static mount that serves this file</li>
+</ul>
+</main>
+</body>
+</html>

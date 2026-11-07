@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/chain.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html" aria-current="page">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/chain.py</code> — fetch chain orchestration</h1>
+<h2>Purpose</h2>
+<p>Coordinates one transcript fetch: parse the URL, try the primary fetcher once,
+and on a transient upstream failure (<code>UPSTREAM_FAILURE</code>) try the fallback
+fetcher exactly once. A global single-flight semaphore guarantees at most one
+chain hits YouTube at a time; concurrent callers are rejected immediately
+with <code>BusyError</code> (HTTP 503) rather than queued. Every attempt — success or
+failure — is logged as exactly one structured <code>fetch_attempt</code> entry.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>FetchChain</code> — the orchestrator; <code>run(url) -&gt; FetchResult</code>.</li>
+<li><code>FetchResult</code> — frozen dataclass: <code>text</code>, <code>video_id</code>, <code>title</code>, <code>language</code>,
+  <code>source</code> (<code>"primary"</code> | <code>"fallback"</code>).</li>
+<li><code>default_chain</code> — the module-level chain used by the HTTP API
+  (patchable in tests).</li>
+<li><code>REQUESTED_LANGUAGE</code> — <code>"en"</code>; the language requested from the fetchers.</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Single-flight, reject-don't-queue.</strong> If the semaphore is already locked,
+  the caller is rejected immediately (<code>BusyError</code>, a <code>fetch_rejected</code>
+  warning log) — the chain never makes a second user wait behind the first.</li>
+<li><strong>The semaphore governs only the YouTube fetch chain.</strong> No other code —
+  read endpoints, summarization, log streaming — may acquire it.</li>
+<li><strong>Parse before acquiring.</strong> <code>parse_video_ref</code> is pure (no network) and runs
+  before the semaphore, so an invalid URL never consumes the fetch slot.</li>
+<li><strong>Exactly one fallback attempt, only for transient codes.</strong> Fallback runs
+  only when the primary's error code is in <code>FALLBACK_CODES</code>
+  (<code>{"UPSTREAM_FAILURE"}</code>); <code>VIDEO_UNAVAILABLE</code>/<code>NO_CAPTIONS</code> re-raise
+  straight through.</li>
+<li><strong>The semaphore is always released</strong> (<code>finally</code>), even on failure.</li>
+<li><strong>Every attempt is logged once</strong>, with video id, requested language, source,
+  outcome (+ failure <code>reason</code> and <code>detail</code>), duration in ms, and — on success
+  — the transcript character count.</li>
+<li><strong>Hard timeout per attempt.</strong> Each fetcher call runs in a worker thread
+  (<code>asyncio.to_thread</code>) under <code>asyncio.wait_for</code> with <code>ATTEMPT_TIMEOUT</code>
+  (30 s); a timeout is re-raised as <code>UpstreamFailureError</code> and <em>can</em> trigger
+  the fallback. Any other unexpected exception is likewise wrapped into
+  <code>UpstreamFailureError</code> (defensive: anything unexpected is upstream).</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>fetch_attempt</code> — info on success (<code>outcome=success</code>, <code>chars</code>), error on
+  failure (<code>outcome=failure</code>, <code>reason</code>, <code>detail</code>).</li>
+<li><code>fetch_rejected</code> — warning when a concurrent caller is rejected as busy.</li>
+</ul>
+<h2>Error codes raised/handled</h2>
+<p>Raises: <code>InvalidUrlError</code> (from <code>urls.py</code>, pre-semaphore), <code>BusyError</code>
+(503, when the slot is held), <code>UpstreamFailureError</code> (502, on timeout,
+unexpected exception, or final fetcher failure). Re-raises without fallback:
+<code>VideoUnavailableError</code>, <code>NoCaptionsError</code>.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-10-29-youtube-transcript</code>:</p>
+<ul>
+<li><strong>D3</strong> — fetch chain: <code>youtube-transcript-api</code> primary, <code>yt-dlp</code> fallback,
+  in-process (the library API, not a CLI subprocess); the response reports
+  which source produced the text.</li>
+<li><strong>D4</strong> — fetch hygiene for hostile IPs: browser-like User-Agent, hard 30 s
+  timeout per attempt, global <code>asyncio.Semaphore(1)</code> with immediate
+  503 <code>BUSY</code> for excess concurrent requests, keeping the footprint tiny.</li>
+</ul>
+<p>The <code>fetch_attempt</code> log schema (video id, language, source, outcome/reason,
+duration, char count) comes from the same change's <strong>D8</strong> (logging); the
+failure <code>detail</code> field was added by <code>2026-11-03-add-log-viewer</code> decision 5.</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="fetchers.html"><code>fetchers.py</code></a> — the two fetchers the chain dispatches to</li>
+<li><a href="urls.html"><code>urls.py</code></a> — the pure parse step that runs first</li>
+<li><a href="errors.html"><code>errors.py</code></a> — the taxonomy and <code>FALLBACK_CODES</code></li>
+<li><a href="main.html"><code>main.py</code></a> — the endpoint that drives <code>default_chain</code></li>
+</ul>
+</main>
+</body>
+</html>

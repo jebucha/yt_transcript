@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>docker-compose.yml — yt-transcript code docs</title>
+<link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="../index.html">index</a></li>
+  <li><a href="../__init__.html">app/__init__.py</a></li>
+  <li><a href="../main.html">app/main.py</a></li>
+  <li><a href="../chain.html">app/chain.py</a></li>
+  <li><a href="../fetchers.html">app/fetchers.py</a></li>
+  <li><a href="../urls.html">app/urls.py</a></li>
+  <li><a href="../errors.html">app/errors.py</a></li>
+  <li><a href="../persist.html">app/persist.py</a></li>
+  <li><a href="../library.html">app/library.py</a></li>
+  <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../log.html">app/log.py</a></li>
+  <li><a href="../logbus.html">app/logbus.py</a></li>
+  <li><a href="../static/app-js.html">app/static/app.js</a></li>
+  <li><a href="../static/index-html.html">app/static/index.html</a></li>
+  <li><a href="../static/style-css.html">app/static/style.css</a></li>
+  <li><a href="Dockerfile.html">Dockerfile</a></li>
+  <li><a href="compose-yml.html" aria-current="page">docker-compose.yml</a></li>
+  <li><a href="../providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>docker-compose.yml</code> — declarative single-service deployment</h1>
+<h2>Purpose</h2>
+<p>The Compose file that turns a local or VPS checkout into a running yt-transcript
+instance in one command (<code>docker compose up -d --build</code>). Single service, no
+profiles, no build args — deliberately scoped to the subset supported by both
+Docker Compose v2 and podman-compose for parity.</p>
+<h2>Public surface</h2>
+<ul>
+<li><strong>Service name:</strong> <code>app</code> (the only service)</li>
+<li><strong>Container image:</strong> <code>yt-transcript</code> (built from <code>./</code>)</li>
+<li><strong>Container name:</strong> <code>yt-transcript</code> (fixed, matches non-compose usage)</li>
+<li><strong>Host-side knobs</strong> (via uncommitted <code>.env</code> file):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Maps to</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PORT</code></td>
+<td><code>8000</code></td>
+<td>Port mapping <code>${PORT:-8000}:8000</code></td>
+<td>Host port only; container always listens on 8000</td>
+</tr>
+<tr>
+<td><code>TRANSCRIPTS_DIR</code></td>
+<td><code>/home/john/transcripts</code></td>
+<td>Volume mount <code>${...}:/transcripts</code></td>
+<td>Writable host directory; app never creates it</td>
+</tr>
+<tr>
+<td><code>PROVIDERS_CONFIG</code></td>
+<td><code>./providers.json</code></td>
+<td>Read-only volume <code>${...}:/app/providers.json:ro</code></td>
+<td>JSON config file kept out of git</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Healthcheck:</strong> python urllib probe against <code>http://127.0.0.1:8000/</code></li>
+<li>interval 30s, timeout 5s, retries 3, start_period 5s</li>
+<li><strong>Log rotation:</strong> json-file driver, max-size 10m, max-file 3 (max ~30 MB)</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Host/container port decoupling.</strong> The container always binds 8000 regardless
+  of <code>PORT</code>. This keeps the healthcheck simple (hardcoded to 8000) and prevents
+  a mismatch between mapped host port and logged <code>server_started</code> port.</li>
+<li><strong>Container-side paths are fixed.</strong> <code>/transcripts</code>, <code>/app/providers.json</code> —
+  only the host side is overridable via <code>.env</code>. A future change that remaps
+  container paths must update both the volume mount <em>and</em> healthcheck address.</li>
+<li><strong><code>.env</code> never committed.</strong> It contains machine-local overrides; tracked in
+  <code>.gitignore</code> (<code>.env</code>).</li>
+<li><strong>Single-instance only.</strong> The fixed <code>container_name: yt-transcript</code> means two
+  compose projects on one host cannot coexist — acceptable for a single-user
+  self-hosted tool.</li>
+<li><strong>Read-only config mount.</strong> <code>/app/providers.json</code> is mounted <code>ro</code>; the app's
+  per-request config read never modifies it.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>N/A — this file emits nothing. However, it controls operational behavior:
+- Healthcheck failures surface as container restarts (3 retries then down)
+- Log rotation limits how much structured log data accumulates (~30 MB max)
+- The healthcheck probe (<code>/</code>) returns 200 when the static UI is served — this
+  confirms the app process is alive but does <em>not</em> verify the fetch chain works</p>
+<h2>Error codes raised/handled</h2>
+<p>Failure modes and their observable effects:
+- <strong>Port conflict on host</strong> (EADDRINUSE) — compose logs show bind failure; fix by
+  changing <code>PORT</code> in <code>.env</code> or killing the conflicting process
+- <strong>Missing TRANSCRIPTS_DIR</strong> on host — container starts but transcript saves fail
+  silently with a <code>config_load_failed</code> event logged by the app (best-effort behavior)
+- <strong>Missing or invalid providers.json</strong> — app emits <code>config_load_failed</code>; summarization
+  endpoints return <code>NOT_CONFIGURED</code>; UI provider picker remains empty; fetch still works</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-10-29-add-docker-compose</code>:
+- <strong>decision 1</strong> — host/container port decoupling (<code>${PORT:-8000}:8000</code>); keeps healthcheck address hardcoded and unambiguous
+- <strong>decision 2</strong> — python urllib probe instead of curl (no curl in slim image) or new <code>/health</code> endpoint (out of scope for a compose-only change)
+- <strong>decision 3</strong> — json-file log rotation (10m × 3); prevents unbounded VPS disk growth from structured JSON log lines
+- <strong>decision 4</strong> — plain compose v2, no <code>version:</code> key; filename chosen for podman-compose compatibility over the newer <code>compose.yaml</code> convention
+- <strong>decision 5</strong> — fixed container name for single-instance assumption and smoke-test parity with documented <code>docker run</code> usage</p>
+<p>Also from later changes:
+- <code>add-transcript-summary</code> — provider config mount path <code>/app/providers.json</code> aligns with the app's runtime default; summary provider listing endpoint is secret-free (no keys exposed via compose)</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="Dockerfile.html"><code>Dockerfile</code></a> — builds this image (<code>build: .</code>)</li>
+<li><a href="../providers-json-example.html"><code>providers.json.example</code></a> — config file shape for the mounted volume</li>
+<li><a href="../providers.html"><code>app/providers.py</code></a> — reads <code>PROVIDERS_CONFIG</code> per request inside the container</li>
+<li>README.md → Deployment section (quick start, podman commands)</li>
+</ul>
+</main>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/__init__.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html" aria-current="page">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/__init__.py</code> — the <code>app</code> package</h1>
+<h2>Purpose</h2>
+<p>The <code>app</code> package is the entire FastAPI application: the web layer, the
+YouTube fetch chain, persistence, summarization, and structured logging. The
+<code>__init__.py</code> file is <strong>deliberately empty</strong> — it exists only to mark the
+directory as a package. It imports nothing and performs no work, so importing
+<code>app</code> (or any submodule) never triggers package-level side effects.</p>
+<p>The side effects people associate with "importing the app" actually live in
+<code>app/main.py</code>, which at import time (1) configures JSON-to-stdout logging once
+via <code>applog.setup_logging()</code> and (2) builds the module-level <code>app = create_app()</code>
+instance (which installs the unhandled-exception hook). Entry points:
+<code>uvicorn app.main:app</code> and <code>python -m app.main</code> (the Docker <code>CMD</code>).</p>
+<h2>Public surface</h2>
+<p>Nothing is exported from the package. Consumers import submodules directly
+(<code>from app import chain as chain_mod</code>, <code>from app.persist import derive_file_name</code>).
+The package's effective API is the set of modules below plus the ASGI app
+object <code>app.main.app</code>.</p>
+<h2>Invariants</h2>
+<ul>
+<li><strong><code>__init__.py</code> must stay empty.</strong> No imports, no re-exports, no setup —
+  the side effects belong to <code>app/main.py</code> where they are deliberate and
+  documented.</li>
+<li><strong>Backend modules stay FastAPI-free.</strong> <code>persist.py</code>, <code>library.py</code>,
+  <code>providers.py</code>, and <code>summarize.py</code> must not import FastAPI, so they remain
+  testable directly against <code>tmp_path</code> without an app instance.</li>
+<li><strong>No blocking I/O on the event loop.</strong> All filesystem and network work
+  dispatches to worker threads (<code>asyncio.to_thread</code>, or the dedicated
+  summarize executor); only <code>app/main.py</code> orchestrates this.</li>
+<li><strong>The single-flight semaphore governs only the YouTube fetch chain</strong>
+  (<code>app/chain.py</code>); read endpoints and summarization must never touch it.</li>
+</ul>
+<h2>Module inventory</h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="main.html"><code>main.py</code></a></td>
+<td>app factory, middleware, API endpoints, uvicorn entry point</td>
+</tr>
+<tr>
+<td><a href="chain.html"><code>chain.py</code></a></td>
+<td>fetch-chain orchestration (primary → fallback, single-flight)</td>
+</tr>
+<tr>
+<td><a href="fetchers.html"><code>fetchers.py</code></a></td>
+<td>caption-track fetchers (primary + fallback) and text cleaning</td>
+</tr>
+<tr>
+<td><a href="urls.html"><code>urls.py</code></a></td>
+<td>YouTube URL/ID parsing (pure, no network)</td>
+</tr>
+<tr>
+<td><a href="errors.html"><code>errors.py</code></a></td>
+<td>error taxonomy (code + HTTP status + message)</td>
+</tr>
+<tr>
+<td><a href="persist.html"><code>persist.py</code></a></td>
+<td>title-to-file-name derivation + best-effort transcript writer</td>
+</tr>
+<tr>
+<td><a href="library.html"><code>library.py</code></a></td>
+<td>read side of saved transcripts (list + read)</td>
+</tr>
+<tr>
+<td><a href="providers.html"><code>providers.py</code></a></td>
+<td>summarization provider config (read per request)</td>
+</tr>
+<tr>
+<td><a href="summarize.html"><code>summarize.py</code></a></td>
+<td>provider invocation + summary file save/read</td>
+</tr>
+<tr>
+<td><a href="log.html"><code>log.py</code></a></td>
+<td>structlog JSON-to-stdout setup</td>
+</tr>
+<tr>
+<td><a href="logbus.html"><code>logbus.py</code></a></td>
+<td>in-memory ring buffer backing the SSE log viewer</td>
+</tr>
+<tr>
+<td><a href="static/app-js.html"><code>static/</code></a></td>
+<td><code>app.js</code>, <code>index.html</code>, <code>style.css</code> — the no-build-step UI</td>
+</tr>
+</tbody>
+</table>
+<h2>Log events emitted</h2>
+<p>None — this file emits nothing (it has no code). See the individual module
+pages for the events each emits.</p>
+<h2>Error codes</h2>
+<p>None — this file raises and handles nothing. The taxonomy lives in
+<a href="errors.html"><code>errors.py</code></a>.</p>
+<h2>Design decisions</h2>
+<p>The package layout is the accumulation of per-change decisions; the
+conventions that bind all modules come from the change that first wrote a
+backend module — <code>2026-10-30-add-transcript-persistence</code>, design decision 2
+(a new module, pure, with <strong>no FastAPI imports</strong> so it is testable against
+<code>tmp_path</code>). Archived design docs live under <code>openspec/changes/archive/</code>;
+this page cites them by name so every link in the docs set stays inside
+<code>docs/</code>. AGENTS.md now codifies the package-wide invariants: uv-managed
+environment, no blocking I/O on the event loop, single-flight semaphore
+scoped to the fetch chain only.</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="main.html"><code>main.py</code></a> — where the package's import-time side effects live</li>
+<li><a href="errors.html"><code>errors.py</code></a> — the shared error taxonomy</li>
+<li><a href="log.html"><code>log.py</code></a> / <a href="logbus.html"><code>logbus.py</code></a> — the shared logging stack</li>
+</ul>
+</main>
+</body>
+</html>

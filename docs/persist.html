@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/persist.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html" aria-current="page">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/persist.py</code> — transcript persistence (write side)</h1>
+<h2>Purpose</h2>
+<p>Two jobs: derive a path-safe <code>.txt</code> file name from a video title (a pure
+function) and write a successfully fetched transcript to a plain-text file
+(best-effort). This is the sole write path for transcripts; the read side
+lives in <code>library.py</code>.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>derive_file_name(title, video_id) -&gt; str</code> — pure, no I/O; the full file
+  name including <code>.txt</code>.</li>
+<li><code>save_transcript(text, title, video_id) -&gt; str | None</code> — best-effort
+  writer; returns the written path, <code>None</code> on any failure.</li>
+<li><code>transcript_dir() -&gt; Path</code> — resolves <code>TRANSCRIPT_DIR</code> (default
+  <code>/transcripts</code>) <strong>at call time</strong>.</li>
+<li>File format: the video's watch URL
+  (<code>https://www.youtube.com/watch?v=&lt;video_id&gt;</code>) as the first line, then the
+  transcript text, then a single trailing newline — UTF-8.</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The derivation is pure and the writer is testable
+  directly against <code>tmp_path</code>; the module must stay importable without an
+  app instance.</li>
+<li><strong>Never raises to the caller.</strong> Any write error (missing directory,
+  permissions, disk full, encoding) is logged as <code>transcript_save_failed</code>
+  and swallowed — persistence is a side effect of a successful fetch, and a
+  failed save must never break the response.</li>
+<li><strong>Never creates the transcript directory.</strong> A missing directory is an
+  operator-config condition that degrades to the logged failure; the app
+  creating it would be a permissions trap on the bind mount.</li>
+<li><strong>Name derivation rules, in order:</strong> lowercase; replace every run of
+  non-letter/non-digit characters (punctuation, whitespace, symbols —
+  including <code>/</code>, so the output is inherently path-safe) with a single <code>_</code>;
+  trim <code>_</code> edges; empty → the video ID; over 255 bytes with <code>.txt</code> → truncate
+  on a character boundary (never mid-codepoint) and append <code>_&lt;video_id&gt;</code> so
+  the result still fits. The video-ID suffix appears <strong>only when
+  truncation happens</strong>. 255 bytes is ext4's hard limit — the deployment
+  target.</li>
+<li><strong>Plain overwrite, no atomic replace.</strong> A re-fetch of the same video
+  rewrites identical bytes; the single-flight semaphore makes concurrent
+  writes of the same file a non-issue.</li>
+<li><strong>Watch URL header, reconstructed from the video ID</strong> — not the URL the
+  user pasted — so the same video always writes the same bytes no matter
+  which URL variant triggered the fetch.</li>
+<li>The directory is resolved <em>outside</em> the try block so the failure handler
+  can always reference the intended path.</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>transcript_saved</code> (info): <code>video_id</code>, <code>path</code>, <code>bytes</code> (the encoded
+  content, header line included).</li>
+<li><code>transcript_save_failed</code> (error): <code>video_id</code>, <code>reason</code> (exception type
+  name), <code>path</code>, <code>detail</code> (the OS error string).</li>
+</ul>
+<h2>Error codes raised/handled</h2>
+<p>None raised. Catches broad <code>Exception</code> on the write — by design.</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-30-add-transcript-persistence</code> <strong>decision 2</strong> (new module, pure
+  derivation + writer, no FastAPI), <strong>decision 3</strong> (the name derivation
+  algorithm above), <strong>decision 4</strong> (best-effort write with structured
+  logging, never re-raised), <strong>decision 5</strong> (worker-thread write, plain
+  overwrite), <strong>decision 6</strong> (<code>TRANSCRIPT_DIR</code> read at call time, default
+  <code>/transcripts</code>, directory deliberately not created).</li>
+<li><code>2026-11-03-add-video-url-header</code> <strong>decision 1</strong> (header is the watch URL
+  reconstructed from the video ID), <strong>decision 2</strong> (bare URL, first line, no
+  label, no blank separator), <strong>decision 3</strong> (content assembled before
+  encoding so the <code>bytes</code> log field counts the header).</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="library.html"><code>library.py</code></a> — the read side over the same directory</li>
+<li><a href="main.html"><code>main.py</code></a> — the endpoint that calls <code>save_transcript</code></li>
+<li><a href="summarize.html"><code>summarize.py</code></a> — the alongside <code>.summary</code> writer</li>
+<li><a href="__init__.html"><code>__init__.py</code></a> — the no-FastAPI-imports package convention</li>
+</ul>
+</main>
+</body>
+</html>

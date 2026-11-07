@@ -288,4 +288,5 @@ app/            FastAPI application
   logbus.py     in-memory ring buffer backing the SSE log viewer
   static/       index.html, style.css, app.js (no build step, no CDN)
 tests/          unit/API/logging tests + tests/e2e (Playwright, dev-only)
+docs/           per-file code documentation (open docs/index.html in a browser)
 ```

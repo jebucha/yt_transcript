@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>providers.json.example — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html" aria-current="page">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>providers.json.example</code> — summarization provider config shape</h1>
+<h2>Purpose</h2>
+<p>An example JSON configuration file that defines one or more summarization providers
+for the yt-transcript app. Mounted read-only at <code>/app/providers.json</code> inside the
+Docker container (see docker-compose.yml), it tells the app which backend to send
+transcripts through for summarization and how to address each provider's API.</p>
+<p>The <code>.example</code> suffix is a convention: the file lives in git as a template; operators
+copy or edit it to create the real <code>providers.json</code>, keeping secrets out of version control.</p>
+<h2>Public surface</h2>
+<ul>
+<li><strong>JSON structure:</strong> top-level object with two keys — <code>"provider"</code> (map of provider
+  definitions) and optionally <code>"default"</code> (which provider id to pre-select in the UI).</li>
+<li><strong>Per-provider fields:</strong></li>
+<li><code>name</code> — display name shown in the UI; falls back to <code>id</code> if omitted</li>
+<li><code>options.baseURL</code> — required; API endpoint URL for the provider</li>
+<li><code>options.apiKey</code> — optional; omitted or non-string values are treated as "no key"</li>
+<li><code>models</code> — required map of model-id → description (any string value); keys become
+    the selectable model options in the UI</li>
+</ul>
+<pre><code class="language-json">{
+    &quot;provider&quot;: {
+        &quot;&lt;id&gt;&quot;: {
+            &quot;name&quot;: &quot;&lt;display name&gt;&quot;,
+            &quot;options&quot;: {
+                &quot;baseURL&quot;: &quot;https://api.example.com/v1&quot;,
+                &quot;apiKey&quot;: &quot;&lt;your-key&gt;&quot;
+            },
+            &quot;models&quot;: {
+                &quot;&lt;model-id-1&gt;&quot;: &quot;Model description or label&quot;,
+                &quot;&lt;model-id-2&gt;&quot;: &quot;Another model&quot;
+            }
+        }
+    },
+    &quot;default&quot;: &quot;&lt;id&gt;&quot;
+}
+</code></pre>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Valid JSON, top-level object.</strong> Missing file → no providers configured (graceful).
+  Invalid JSON or non-object top level → <code>config_load_failed</code> error logged.</li>
+<li><strong><code>.example</code> is a template.</strong> The real file (<code>providers.json</code>) must not be committed
+  to git; secrets belong in the <code>.env</code>-adjacent config, never in version control.</li>
+<li><strong>Read-only mount.</strong> docker-compose.yml mounts this as <code>ro</code>; the app reads it per request
+  but never writes or caches it at startup. Edits take effect on the next API call.</li>
+<li><strong>Default must reference an existing provider id.</strong> If <code>"default"</code> is missing, not a
+  string, or references a removed provider, the first usable provider becomes default.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>The app emits <code>config_load_failed</code> (error level) when the config file exists but cannot be
+parsed — carrying the path, reason (<code>invalid_json</code>, <code>invalid_structure</code>), and a detail field
+with the parse error message. A missing file produces no log entry; it is treated as "not
+configured" rather than an error state.</p>
+<h2>Error codes raised/handled</h2>
+<ul>
+<li><strong>Missing or unreadable file</strong> → app logs nothing at startup, returns empty provider list;
+  <code>/api/summarize</code> endpoints return <code>NOT_CONFIGURED</code>; <code>/api/providers</code> returns an empty array</li>
+<li><strong>Invalid JSON</strong> → <code>config_load_failed</code> logged; same degraded behavior as missing file</li>
+<li><strong>Missing or invalid <code>baseURL</code></strong> for a provider entry → that provider is silently skipped;
+  other providers remain usable</li>
+<li><strong>No usable providers</strong> (all entries malformed) → same as empty config</li>
+</ul>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:
+- <code>add-transcript-summary</code> decision 3 — config read per request, never at startup. This means
+  edits take effect immediately and a missing file is always treated as "not configured" rather
+  than a hard failure.
+- <code>add-transcript-summary</code> decision 7 — the <code>/api/providers</code> endpoint returns a secret-free list
+  of providers (id + name only); API keys never leave the server. The UI picker pre-selects
+  whichever provider is marked as default in this file.</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="deploy/compose-yml.html"><code>docker-compose.yml</code></a> — mounted at <code>/app/providers.json:ro</code> via volume</li>
+<li><a href="providers.html"><code>app/providers.py</code></a> — reads and parses this config (<code>load_providers()</code>)</li>
+<li><a href="main.html"><code>main.py</code></a> — <code>GET /api/providers</code> (secret-free listing), <code>POST /api/summarize</code></li>
+</ul>
+</main>
+</body>
+</html>

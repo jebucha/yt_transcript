@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>index — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html" aria-current="page">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1>yt-transcript — code documentation</h1>
+<p>Per-file documentation for every file in <code>app/</code>, plus deployment configs
+(<code>Dockerfile</code>, <code>docker-compose.yml</code>) and the provider configuration template.
+One page per Python module, one per static UI file, one per deploy/config file —
+module-level and invariant-forward: what each file is <em>for</em>, the rules that must
+keep holding, and the "design decision N" items behind them (resolved from the
+archived change design docs under <code>openspec/changes/archive/</code>). Written for a
+returning human and for an AI agent working the repo; open this file in a browser.</p>
+<h2>System flow</h2>
+<pre><code>browser (app/static: index.html + app.js + style.css - no build, no CDN)
+  |
+  |  POST /api/transcript {&quot;url&quot;: ...}
+  v
+app/main.py  (FastAPI: 5 MiB body cap -&gt; request logging -&gt; routes)
+  |
+  v
+app/urls.py   parse_video_ref(url)        pure, no network, before the slot
+  |
+  v
+app/chain.py  FetchChain.run - asyncio.Semaphore(1), single flight
+  |   slot already held? -&gt; 503 BUSY immediately (reject, don't queue)
+  |
+  | attempt 1
+  v
+app/fetchers.py  primary_fetch   (youtube-transcript-api)
+  |
+  | only on UPSTREAM_FAILURE: exactly one fallback attempt
+  v
+app/fetchers.py  fallback_fetch  (yt-dlp library, json3, no download)
+  |
+  | success
+  v
+app/persist.py  save_transcript   best-effort, worker thread
+  |
+  v
+/transcripts/&lt;title&gt;.txt           bind-mounted; the app never creates it
+  ^
+  |  read side (never touches the fetch slot)
+  |
+  |  GET /api/transcripts            app/library.py - list
+  |  GET /api/transcripts/{name}     app/library.py - read
+  |  GET /api/transcripts/{name}/summary  app/summarize.py - read
+  |  POST /api/summarize             app/summarize.py - backend call,
+  |                                  app/providers.py config read per request,
+  |                                  dedicated 2-worker executor
+  |
+  |  GET /api/providers              app/providers.py - secret-free listing
+  |  GET /api/logs (SSE)             app/logbus.py - 200-entry ring buffer
+  v
+app/log.py  structlog: one JSON object per line -&gt; stdout
+  (every module's events: server_*, http_request, fetch_*, *_saved,
+   summary_*, config_load_failed, unhandled_exception)
+
+app/errors.py - code + HTTP status + message; the taxonomy every failure
+maps to
+</code></pre>
+<pre><code>operator
+  |
+  |  docker compose up -d --build
+  v
+Dockerfile       → single-stage image (astral/uv:python3.13-bookworm-slim)
+  |
+  v
+docker-compose.yml → service definition, port mapping, volumes, healthcheck
+  |
+  |  PROVIDERS_CONFIG: ./providers.json:/app/providers.json:ro (mounted)
+  v
+providers.json.example → config shape for summarization providers
+</code></pre>
+<h2>Contents</h2>
+<h3>Python modules</h3>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="__init__.html"><code>app/__init__.py</code></a></td>
+<td>the package: role, import-time side effects, module inventory</td>
+</tr>
+<tr>
+<td><a href="main.html"><code>app/main.py</code></a></td>
+<td>app factory, middleware, API endpoints, uvicorn entry point</td>
+</tr>
+<tr>
+<td><a href="chain.html"><code>app/chain.py</code></a></td>
+<td>fetch-chain orchestration: primary → fallback, single-flight</td>
+</tr>
+<tr>
+<td><a href="fetchers.html"><code>app/fetchers.py</code></a></td>
+<td>the two caption-track fetchers and text cleaning</td>
+</tr>
+<tr>
+<td><a href="urls.html"><code>app/urls.py</code></a></td>
+<td>YouTube URL/ID parsing (pure, no network)</td>
+</tr>
+<tr>
+<td><a href="errors.html"><code>app/errors.py</code></a></td>
+<td>the error taxonomy (code + status + message)</td>
+</tr>
+<tr>
+<td><a href="persist.html"><code>app/persist.py</code></a></td>
+<td>title-to-file-name derivation + best-effort writer</td>
+</tr>
+<tr>
+<td><a href="library.html"><code>app/library.py</code></a></td>
+<td>read side of saved transcripts (list + read)</td>
+</tr>
+<tr>
+<td><a href="providers.html"><code>app/providers.py</code></a></td>
+<td>summarization provider config (read per request)</td>
+</tr>
+<tr>
+<td><a href="summarize.html"><code>app/summarize.py</code></a></td>
+<td>provider invocation + summary file save/read</td>
+</tr>
+<tr>
+<td><a href="log.html"><code>app/log.py</code></a></td>
+<td>structlog JSON-to-stdout setup</td>
+</tr>
+<tr>
+<td><a href="logbus.html"><code>app/logbus.py</code></a></td>
+<td>in-memory ring buffer backing the SSE log viewer</td>
+</tr>
+</tbody>
+</table>
+<h3>Static UI files</h3>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="static/app-js.html"><code>app/static/app.js</code></a></td>
+<td>the frontend script: behavior, state, DOM contract</td>
+</tr>
+<tr>
+<td><a href="static/index-html.html"><code>app/static/index.html</code></a></td>
+<td>the single static page: the DOM contract</td>
+</tr>
+<tr>
+<td><a href="static/style-css.html"><code>app/static/style.css</code></a></td>
+<td>the self-contained stylesheet</td>
+</tr>
+</tbody>
+</table>
+<h3>Deployment configs</h3>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="deploy/Dockerfile.html"><code>Dockerfile</code></a></td>
+<td>single-stage image build (unprivileged, podman-compatible)</td>
+</tr>
+<tr>
+<td><a href="deploy/compose-yml.html"><code>docker-compose.yml</code></a></td>
+<td>declarative deployment: ports, volumes, healthcheck</td>
+</tr>
+</tbody>
+</table>
+<h3>Config artifacts</h3>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="providers-json-example.html"><code>providers.json.example</code></a></td>
+<td>summarization provider config shape (mounted read-only)</td>
+</tr>
+</tbody>
+</table>
+<h2>Keeping the HTML in sync</h2>
+<p>Markdown is the single source of truth; the <code>.html</code> files are generated
+output. After editing any page, re-render with:</p>
+<pre><code>uv run python docs/generate.py
+</code></pre>
+<p>and commit the regenerated HTML. The generator is <code>docs/generate.py</code>
+(stdlib + the dev-only <code>markdown</code> dependency) — it wraps every page in the
+shared shell (sidebar nav + <code>style.css</code>) and renders the <code>fenced_code</code> and
+<code>tables</code> extensions only.</p>
+</main>
+</body>
+</html>

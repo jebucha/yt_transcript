@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/static/app.js — yt-transcript code docs</title>
+<link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="../index.html">index</a></li>
+  <li><a href="../__init__.html">app/__init__.py</a></li>
+  <li><a href="../main.html">app/main.py</a></li>
+  <li><a href="../chain.html">app/chain.py</a></li>
+  <li><a href="../fetchers.html">app/fetchers.py</a></li>
+  <li><a href="../urls.html">app/urls.py</a></li>
+  <li><a href="../errors.html">app/errors.py</a></li>
+  <li><a href="../persist.html">app/persist.py</a></li>
+  <li><a href="../library.html">app/library.py</a></li>
+  <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../log.html">app/log.py</a></li>
+  <li><a href="../logbus.html">app/logbus.py</a></li>
+  <li><a href="app-js.html" aria-current="page">app/static/app.js</a></li>
+  <li><a href="index-html.html">app/static/index.html</a></li>
+  <li><a href="style-css.html">app/static/style.css</a></li>
+  <li><a href="../deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="../deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="../providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/static/app.js</code> — the frontend script</h1>
+<h2>Purpose</h2>
+<p>The entire frontend behavior, in one vanilla-JS IIFE with <code>"use strict"</code>:
+fetch flow and result display, copy/download, the saved-transcripts list,
+summarization, and the live log viewer. No framework, no build step, no CDN
+— the file is served as-is at <code>/app.js</code> and references DOM ids defined in
+<code>index.html</code>.</p>
+<h2>Public surface</h2>
+<p>Nothing is exported (module-scoped IIFE). Its effective API is the set of DOM
+ids it requires from <code>index.html</code>: <code>url-input</code>, <code>fetch-form</code>, <code>fetch-btn</code>,
+<code>fetch-spinner</code>, <code>error-banner</code>, <code>result</code>, <code>video-title</code>, <code>video-language</code>,
+<code>transcript-panel</code>, <code>copy-btn</code>, <code>download-btn</code>, <code>saved-list</code>, <code>saved-empty</code>,
+<code>saved-count</code>, <code>saved-refresh-btn</code>, <code>provider-picker</code>, <code>summarize-btn</code>,
+<code>summarize-spinner</code>, <code>summary-panel</code>, <code>summary-text</code>, <code>summary-copy-btn</code>,
+<code>log-panel</code>, <code>logs-toggle</code>. It also defines the <code>ERROR_MESSAGES</code> map (server
+error code → human message) for the nine taxonomy codes.</p>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No-<code>innerHTML</code> rule — absolute.</strong> Every fetched string (transcript,
+  title, names, summary, log lines) enters the DOM via <code>textContent</code> (or
+  element construction) only; never as HTML. Markup-like content from
+  YouTube or a backend cannot be rendered or executed.</li>
+<li><strong>Requests use the real file name, display uses a prettified one.</strong> List
+  rows keep the real name in <code>data-name</code>; the display label (extension
+  stripped, underscores → spaces, CSS capitalization) is cosmetic and is
+  <em>never</em> sent to the server.</li>
+<li><strong>Two distinct name variables, deliberately.</strong> <code>currentSavedName</code> (a
+  clicked saved row) drives Download's enabled predicate — a freshly fetched
+  transcript does <strong>not</strong> enable Download. <code>currentTranscriptName</code> (the
+  fetch response's derived name, or the saved row's name) is what Summarize
+  sends for the alongside save.</li>
+<li><strong><code>displayToken</code> invalidates stale results.</strong> A monotonic token is bumped
+  on every new transcript display; an in-flight saved-summary response for a
+  previously displayed transcript is discarded.</li>
+<li><strong>No polling.</strong> The saved list and the provider list load once on page
+  load, the list also reloads after each successful fetch and via its
+  Refresh button. The provider list is never re-fetched (a stale picker
+  after a config edit gets a clean 400 <code>INVALID_PROVIDER</code> telling the user
+  to reload).</li>
+<li><strong>Copy works over plain HTTP.</strong> <code>navigator.clipboard.writeText</code> first,
+  falling back to a hidden-textarea <code>execCommand("copy")</code> — the Clipboard
+  API does not exist in non-secure contexts, and plain HTTP is the normal
+  access path.</li>
+<li><strong>A 2xx with no summary text is a failure for display</strong> — show the error
+  region, never an empty panel (same truthiness check as the saved-summary
+  load).</li>
+<li><strong>The log panel is a display concern.</strong> Entries keep accumulating while
+  the panel is hidden, so re-showing it includes what was logged in the
+  meantime; the panel trims to its 200-line display cap (mirroring the
+  server buffer).</li>
+<li><strong>SSE is fire-and-forget.</strong> <code>EventSource</code> reconnects automatically;
+  unparseable payloads are dropped; no error handling is needed.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None (browser code). It <em>formats</em> server events for the panel via
+<code>LOG_FORMATTERS</code> — one-line humanized formatters for the known events
+(<code>server_started</code>, <code>server_stopped</code>, <code>http_request</code>, <code>fetch_attempt</code>,
+<code>fetch_rejected</code>, <code>transcript_saved</code>, <code>transcript_save_failed</code>,
+<code>summary_completed</code>, <code>summary_failed</code>, <code>summary_save_failed</code>,
+<code>config_load_failed</code>, <code>unhandled_exception</code>), with a
+<code>time  LEVEL  event  key=value …</code> fallback for unknown ones.</p>
+<h2>Error codes handled</h2>
+<p><code>INVALID_URL</code>, <code>VIDEO_UNAVAILABLE</code>, <code>NO_CAPTIONS</code>, <code>UPSTREAM_FAILURE</code>,
+<code>BUSY</code>, <code>NOT_CONFIGURED</code>, <code>INVALID_PROVIDER</code>, <code>PROVIDER_ERROR</code>,
+<code>INPUT_TOO_LONG</code> — via the <code>ERROR_MESSAGES</code> map (preferred over the server
+message); network failures and unexpected shapes get a generic message.</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-29-youtube-transcript</code> <strong>D6</strong> — one static page, no build step,
+  no framework, no CDN; the clipboard fallback for non-secure contexts; the
+  no-HTML insertion rule (XSS).</li>
+<li><code>2026-11-02-add-saved-transcript-list</code> <strong>decision 6</strong> — the saved section:
+  reusable result panel, prettified labels with real-name requests,
+  client-side Blob download, load-once-plus-refresh (no polling).</li>
+<li><code>add-transcript-summary</code> <strong>decision 5</strong> (the fetch response's <code>name</code> lands
+  in a <em>new</em> variable; Download's predicate is intentionally untouched),
+  <strong>decision 11</strong> (the UI state machine: picker pre-selection, enabled
+  predicate, <code>currentSummary</code> lifecycle, the e2e seam below
+  <code>summarize_with_provider</code>).</li>
+<li><code>2026-11-03-add-log-viewer</code> <strong>decision 6</strong> — the panel shape, the
+  <code>EventSource</code> opened once at page load, the formatters, the 200-line cap.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="index-html.html"><code>index.html</code></a> — the DOM it wires up</li>
+<li><a href="style-css.html"><code>style.css</code></a> — the classes it toggles</li>
+<li><a href="../main.html"><code>main.html</code></a> — the endpoints it consumes</li>
+</ul>
+</main>
+</body>
+</html>

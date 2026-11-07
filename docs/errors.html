@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/errors.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html" aria-current="page">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/errors.py</code> — error taxonomy</h1>
+<h2>Purpose</h2>
+<p>The single error taxonomy for transcript retrieval and summarization. Every
+failure the app can meaningfully report is a <code>TranscriptError</code> subclass
+carrying a machine-readable <code>code</code>, an HTTP <code>status</code>, and a stable
+human-readable <code>message</code> the UI can display. Endpoints catch <code>TranscriptError</code>
+and map it to the JSON envelope <code>{"error": {"code", "message"}}</code>.</p>
+<h2>Public surface</h2>
+<p><code>TranscriptError</code> (base) and its subclasses:</p>
+<table>
+<thead>
+<tr>
+<th>Exception</th>
+<th>Code</th>
+<th>HTTP</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InvalidUrlError</code></td>
+<td><code>INVALID_URL</code></td>
+<td>400</td>
+<td>not a recognizable YouTube URL/ID</td>
+</tr>
+<tr>
+<td><code>VideoUnavailableError</code></td>
+<td><code>VIDEO_UNAVAILABLE</code></td>
+<td>404</td>
+<td>private, deleted, region-locked, age-restricted</td>
+</tr>
+<tr>
+<td><code>NoCaptionsError</code></td>
+<td><code>NO_CAPTIONS</code></td>
+<td>404</td>
+<td>no caption tracks (or nothing left after cleaning)</td>
+</tr>
+<tr>
+<td><code>UpstreamFailureError</code></td>
+<td><code>UPSTREAM_FAILURE</code></td>
+<td>502</td>
+<td>transient YouTube problem; try again later</td>
+</tr>
+<tr>
+<td><code>BusyError</code></td>
+<td><code>BUSY</code></td>
+<td>503</td>
+<td>the single-flight slot is held by another fetch</td>
+</tr>
+<tr>
+<td><code>SummaryNotConfiguredError</code></td>
+<td><code>NOT_CONFIGURED</code></td>
+<td>503</td>
+<td>no usable providers in the config</td>
+</tr>
+<tr>
+<td><code>InvalidProviderError</code></td>
+<td><code>INVALID_PROVIDER</code></td>
+<td>400</td>
+<td>provider/model no longer in the config</td>
+</tr>
+<tr>
+<td><code>ProviderError</code></td>
+<td><code>PROVIDER_ERROR</code></td>
+<td>502</td>
+<td>the summarization backend failed</td>
+</tr>
+<tr>
+<td><code>InputTooLongError</code></td>
+<td><code>INPUT_TOO_LONG</code></td>
+<td>400</td>
+<td>transcript over the 100,000-character cap</td>
+</tr>
+</tbody>
+</table>
+<p>Plus <code>FALLBACK_CODES</code> — the frozenset of codes for which the chain makes a
+fallback attempt: exactly <code>{"UPSTREAM_FAILURE"}</code>.</p>
+<h2>Invariants</h2>
+<ul>
+<li><strong>One base class, class-level identity.</strong> <code>code</code> and <code>status</code> are class
+  attributes; instances carry only the message (default message when none is
+  passed). Adding a new failure mode means a new subclass here, not an ad-hoc
+  status.</li>
+<li><strong><code>FALLBACK_CODES</code> is transient-problems-only.</strong> Unavailability and
+  missing-captions errors re-raise straight through the chain; only
+  <code>UPSTREAM_FAILURE</code> triggers the one fallback attempt.</li>
+<li><strong>Messages are stable UI contract.</strong> The UI keeps its own <code>ERROR_MESSAGES</code>
+  map by code and prefers it over the server message; the server message is
+  the fallback. Wording changes ripple into the UI, so treat it as an API.</li>
+<li><strong>Not everything is a <code>TranscriptError</code>.</strong> The saved-transcript read
+  endpoints' <code>INVALID_NAME</code> (400) and <code>NOT_FOUND</code> (404) — and the body-size
+  middleware's <code>BODY_TOO_LARGE</code> (413) — are plain HTTP statuses returned
+  directly by <code>main.py</code>, deliberately outside this taxonomy.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None — errors are log payloads (e.g. <code>fetch_attempt</code> with <code>reason=&lt;code&gt;</code>),
+not log emitters.</p>
+<h2>Error codes raised/handled</h2>
+<p>All of the table above are defined here and raised by the fetch/summarize
+modules; <code>main.py</code> is the sole place they are translated to HTTP responses.</p>
+<h2>Design decisions</h2>
+<p>Resolved from the archived change design docs:</p>
+<ul>
+<li><code>2026-10-29-youtube-transcript</code> <strong>D7</strong> (API shape) — the original five
+  fetch errors with their fixed codes and statuses, and the
+  <code>{"error": {"code", "message"}}</code> envelope.</li>
+<li><code>add-transcript-summary</code> <strong>decision 2</strong> — the four summarization errors
+  (<code>NOT_CONFIGURED</code> 503, <code>INVALID_PROVIDER</code> 400, <code>PROVIDER_ERROR</code> 502,
+  <code>INPUT_TOO_LONG</code> 400) added as subclasses, while structurally invalid
+  names keep the read side's plain-HTTP 400 <code>INVALID_NAME</code>.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="chain.html"><code>chain.py</code></a> — where <code>FALLBACK_CODES</code> and <code>BusyError</code> matter</li>
+<li><a href="fetchers.html"><code>fetchers.py</code></a> — the primary mappers of library exceptions</li>
+<li><a href="summarize.html"><code>summarize.py</code></a> — the provider-side failures</li>
+<li><a href="main.html"><code>main.py</code></a> — the only place errors become HTTP responses</li>
+</ul>
+</main>
+</body>
+</html>

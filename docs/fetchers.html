@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/fetchers.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html" aria-current="page">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/fetchers.py</code> — caption-track fetchers</h1>
+<h2>Purpose</h2>
+<p>The two concrete ways to get a video's captions, plus the shared text
+cleaner: <code>primary_fetch</code> via <code>youtube-transcript-api</code> (manual tracks
+preferred, language fallback English → first available) and <code>fallback_fetch</code>
+via <code>yt-dlp</code> used as a Python library (json3 subtitles, no download, no
+ffmpeg). <code>fetch_video_title</code> performs the lightweight watch-page title lookup
+the primary path needs to complete response metadata (yt-dlp provides the
+title itself).</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>primary_fetch(video_id, requested_language="en") -&gt; (text, language_code, title)</code></li>
+<li><code>fallback_fetch(video_id, requested_language="en") -&gt; (text, language_code, title)</code></li>
+<li><code>fetch_video_title(video_id) -&gt; str</code> — raises <code>UpstreamFailureError</code> on
+  any fetch problem (the caller treats that as a transient failure).</li>
+<li><code>clean_text(raw) -&gt; str</code> — the shared output cleaner.</li>
+<li>Constants: <code>ATTEMPT_TIMEOUT</code> (30 s hard cap per attempt), <code>USER_AGENT</code>
+  (browser-like, used on all outgoing YouTube requests).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>Synchronous and blocking by design.</strong> Both fetchers do blocking I/O and
+  must be run in a worker thread with a hard timeout — <code>app/chain.py</code> does
+  exactly this (<code>asyncio.to_thread</code> + <code>asyncio.wait_for</code>). Never call them
+  from the event loop.</li>
+<li><strong>Every failure is a <code>TranscriptError</code> subclass.</strong> No library exception
+  type (youtube-transcript-api's, yt-dlp's, <code>requests</code>') ever escapes this
+  module; each is mapped onto the taxonomy in <code>errors.py</code>.</li>
+<li><strong>Output cleaning is mandatory.</strong> All fetched caption text passes through
+  <code>clean_text</code>: HTML entities decoded, VTT headers/cue timings, bracketed
+  timestamps, SSML tags, and any remaining HTML stripped, Unicode spaces
+  normalized, one cue per line.</li>
+<li><strong>Primary picks manual before auto-generated, English before any other
+  language.</strong> <code>NoCaptionsError</code> when there are no tracks (or the cleaned
+  text is empty).</li>
+<li><strong>Fallback uses a temp directory it removes</strong>, json3 subtitle format,
+  <code>skip_download</code>, <code>retries: 0</code>, the same 30 s socket timeout. An unreadable
+  or non-json3 subtitle file is an <em>upstream data problem</em>
+  (<code>UpstreamFailureError</code>), not a missing-captions case.</li>
+<li><strong>Error mapping is deliberately lossy in a safe direction</strong>: primary maps
+  unavailability-like exceptions to <code>VideoUnavailableError</code>, track-less
+  videos to <code>NoCaptionsError</code>, and everything else (blocks, rate limits,
+  token walls, request failures) to <code>UpstreamFailureError</code> so the chain can
+  fall back. Fallback phrases its mapping on the downloaded error message.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None directly — the chain logs each attempt (<code>fetch_attempt</code>) and the fetchers
+stay quiet. Failure <code>detail</code> strings shown in the log viewer originate from
+the error messages built here and in the chain.</p>
+<h2>Error codes raised/handled</h2>
+<p>Raises: <code>VideoUnavailableError</code> (404), <code>NoCaptionsError</code> (404),
+<code>UpstreamFailureError</code> (502). Handles/maps: <code>YouTubeTranscriptApiException</code>
+subtypes, <code>yt_dlp.utils.DownloadError</code>, <code>requests.RequestException</code>,
+<code>OSError</code>/<code>json.JSONDecodeError</code> on the subtitle file.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-10-29-youtube-transcript</code>:</p>
+<ul>
+<li><strong>D3</strong> — <code>youtube-transcript-api</code> as the battle-tested keyless primary and
+  <code>yt-dlp</code> <em>as a library</em> (no CLI subprocess, no process lifecycle, no
+  ffmpeg for subtitle-only fetching) as the resilience fallback.</li>
+<li><strong>D4</strong> — browser-like User-Agent on all outgoing YouTube requests and the
+  hard 30 s per-attempt timeout.</li>
+</ul>
+<p>Both libraries wrap unofficial YouTube endpoints; when YouTube breaks them
+the recovery is the pinned-version update runbook in the README
+(<code>uv add</code> with exact pins, rebuild, rerun) — the libraries, not this app,
+own the repair loop.</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="chain.html"><code>chain.py</code></a> — the orchestrator that calls these with timeouts</li>
+<li><a href="errors.html"><code>errors.py</code></a> — the taxonomy every failure maps onto</li>
+<li><a href="__init__.html"><code>__init__.py</code></a> — the package layout these modules belong to</li>
+</ul>
+</main>
+</body>
+</html>

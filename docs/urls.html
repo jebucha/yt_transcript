@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/urls.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html" aria-current="page">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/urls.py</code> — YouTube video reference parsing</h1>
+<h2>Purpose</h2>
+<p>Pure parsing and normalization of the user-supplied video reference into the
+11-character video ID that the rest of the app deals in. Nothing in this
+module touches the network — it decides whether a string is a recognizable
+YouTube reference and extracts the ID, or raises <code>InvalidUrlError</code>.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>parse_video_ref(ref: str) -&gt; str</code> — returns the video ID or raises.</li>
+<li><code>VIDEO_ID_RE</code> — <code>^[A-Za-z0-9_-]{11}$</code>, the canonical ID shape.</li>
+</ul>
+<p>Accepted inputs:</p>
+<ul>
+<li>Standard watch URLs: <code>https://www.youtube.com/watch?v=&lt;id&gt;</code> — and the
+  <code>m.</code>, <code>music.</code>, or any subdomain variants of <code>youtube.com</code> and
+  <code>youtube-nocookie.com</code>.</li>
+<li>Short links: <code>https://youtu.be/&lt;id&gt;</code>.</li>
+<li>Bare video IDs: 11 characters of <code>[A-Za-z0-9_-]</code>.</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No network access, ever.</strong> This is the first step of the fetch chain and
+  runs <em>before</em> the single-flight semaphore is acquired, so a malformed URL
+  can never consume the fetch slot.</li>
+<li><strong>Anything not recognized is <code>InvalidUrlError</code></strong> — the function fails
+  closed: no lenient extraction, no guessing.</li>
+<li><strong>The original URL is discarded.</strong> Downstream code (fetchers, persistence)
+  works only with the video ID; the persisted file's header is the watch URL
+  <em>reconstructed</em> from the ID, not the string the user pasted.</li>
+<li>Hostname matching is subdomain-aware (<code>hostname == host or endswith("." + host)</code>)
+  and case-insensitive; the <code>v</code> query parameter is the only query parameter
+  consulted.</li>
+</ul>
+<h2>Log events emitted</h2>
+<p>None — parsing failures surface as the <code>InvalidUrlError</code> the endpoint maps to
+HTTP 400 (the endpoint's <code>http_request</code> line is the only log of the request).</p>
+<h2>Error codes raised/handled</h2>
+<p>Raises: <code>InvalidUrlError</code> (code <code>INVALID_URL</code>, HTTP 400). Handles: malformed
+<code>urlparse</code> input (<code>ValueError</code> → <code>InvalidUrlError</code>).</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>2026-10-29-youtube-transcript</code>:</p>
+<ul>
+<li><strong>D7</strong> (API shape) — <code>POST /api/transcript</code> takes <code>{"url": "..."}</code> and the
+  taxonomy's <code>INVALID_URL</code>/400 entry is how this module's rejection reaches
+  the client.</li>
+</ul>
+<p>The watch-URL-reconstructed-from-the-ID behavior this module enables is
+settled in <code>2026-11-03-add-video-url-header</code> decision 1: the video ID is the
+file's identity, so the persisted header stays stable across fetches of the
+same video regardless of which URL variant the user pasted.</p>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="chain.html"><code>chain.py</code></a> — the caller; parsing happens before its semaphore</li>
+<li><a href="errors.html"><code>errors.py</code></a> — <code>InvalidUrlError</code></li>
+<li><a href="persist.html"><code>persist.py</code></a> — reconstructs the watch URL from the same ID</li>
+</ul>
+</main>
+</body>
+</html>

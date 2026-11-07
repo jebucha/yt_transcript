@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/summarize.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html" aria-current="page">app/summarize.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/summarize.py</code> — summarization backend</h1>
+<h2>Purpose</h2>
+<p>The summarization feature's backend: an OpenAI-compatible
+chat-completions call to a configured provider/model, plus save/read of the
+result as a <code>.summary</code> file next to the transcript. The HTTP dispatch lives
+in the module-level <code>_call_chat_completions</code> so the e2e harness can replace
+that function with a recording stub while <code>summarize_with_provider</code> keeps
+running for real.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>summarize_with_provider(provider, model, text, timeout=None) -&gt; str</code> —
+  the synchronous call; meant to run in a worker thread (the dedicated
+  summarize executor in <code>main.py</code>).</li>
+<li><code>save_summary(name, summary) -&gt; None</code> — best-effort write to
+  <code>&lt;name&gt;.summary</code>.</li>
+<li><code>read_summary(name) -&gt; tuple[bool, str]</code> — contained read of
+  <code>&lt;name&gt;.summary</code>.</li>
+<li><code>summary_timeout() -&gt; float</code> — <code>SUMMARY_TIMEOUT</code> (default 120 s) read at
+  call time; non-numeric values fall back to the default.</li>
+<li><code>ProviderCallError</code> — a failed backend call with machine-readable
+  <code>reason</code> (<code>unreachable</code>, <code>timeout</code>, <code>http_error</code>, <code>malformed_response</code>,
+  <code>empty_response</code>) and a safe, app-constructed <code>detail</code>.</li>
+<li>Constants: <code>MAX_OUTPUT_TOKENS</code> (16384), <code>MAX_INPUT_CHARS</code> (100,000),
+  <code>DEFAULT_SUMMARY_TIMEOUT</code> (120.0), <code>SUMMARY_INSTRUCTION</code> (the fixed,
+  server-side prompt), <code>SUMMARY_EXTENSION</code> (<code>.summary</code>).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The call is a plain synchronous function and the
+  save/read helpers are testable directly against <code>tmp_path</code>.</li>
+<li><strong>Plain HTTP via <code>requests</code>, per-call <code>requests.post</code></strong> — no shared
+  session (thread-safe without locking), no <code>openai</code> SDK. The bearer token
+  is attached only when the provider defines an <code>apiKey</code>.</li>
+<li><strong>Exactly one structured event per call:</strong> <code>summary_completed</code> (info) or
+  <code>summary_failed</code> (error) — and those events (and every log) never carry
+  transcript/summary content, config file contents, or keys. Exception
+  details are exception <em>type names</em> — <code>str()</code> of <code>requests</code> exceptions
+  embeds the base URL, which must stay out of the logs.</li>
+<li><strong>Empty content is a failure.</strong> A 2xx whose <code>choices[0].message.content</code>
+  is empty or whitespace-only raises <code>empty_response</code> — a backend that
+  "succeeds" with no content (thinking models exhausting the output budget
+  in reasoning) is a failed summarization, not a successful one.</li>
+<li><strong>Caps:</strong> input over 100,000 chars is rejected upstream
+  (<code>INPUT_TOO_LONG</code>); output is bounded server-side at <code>max_tokens=16384</code>
+  — sized so reasoning plus a full summary both fit.</li>
+<li><strong>Save is best-effort and never raises;</strong> a failure is only the
+  <code>summary_save_failed</code> event. Overwriting on re-summarize is intended.</li>
+<li><strong>Read follows the read-side discipline</strong> of <code>library.read_transcript</code>:
+  structural reject, resolve-and-contain, regular-file check. The <code>.summary</code>
+  extension keeps summary files out of the <code>.txt</code> saved-transcript list.</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>summary_completed</code> (info): <code>provider</code>, <code>model</code>, <code>duration_ms</code>,
+  <code>chars_in</code>, <code>chars_out</code>.</li>
+<li><code>summary_failed</code> (error): <code>provider</code>, <code>model</code>, <code>duration_ms</code>, <code>reason</code>,
+  <code>detail</code>.</li>
+<li><code>summary_save_failed</code> (error): <code>name</code>, <code>path</code>, <code>reason</code>, <code>detail</code>.</li>
+</ul>
+<h2>Error codes raised/handled</h2>
+<p>Raises <code>ProviderError</code> (502 <code>PROVIDER_ERROR</code>, message includes the
+machine-readable reason) when the backend call fails; handles
+<code>ProviderCallError</code> internally.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>add-transcript-summary</code>:</p>
+<ul>
+<li><strong>decision 1</strong> — plain HTTP via <code>requests</code>, no SDK; the empty-content
+  rule.</li>
+<li><strong>decision 2</strong> — the providers/summarize module split, FastAPI-free.</li>
+<li><strong>decision 6</strong> — summary files: <code>&lt;name&gt;.summary</code>, non-<code>.txt</code>, best-effort
+  save, contained read.</li>
+<li><strong>decision 10</strong> — timeouts and caps, including the "Output cap sizing"
+  story (an observed thinking model produced an empty summary at a 600-token
+  cap; 16384 was chosen for headroom).</li>
+<li><strong>decision 11</strong> — the e2e seam: HTTP dispatch isolated in the module-level
+  <code>_call_chat_completions</code> so the log emission still runs under stubs.</li>
+<li><strong>decision 13</strong> — the logging fields and the never-log-secrets rule.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="providers.html"><code>providers.py</code></a> — the config that supplies the <code>Provider</code></li>
+<li><a href="main.html"><code>main.py</code></a> — the bounded executor and validation order</li>
+<li><a href="library.html"><code>library.py</code></a> — the read-side discipline <code>read_summary</code> mirrors</li>
+<li><a href="persist.html"><code>persist.py</code></a> — the sibling writer in the same directory</li>
+</ul>
+</main>
+</body>
+</html>
