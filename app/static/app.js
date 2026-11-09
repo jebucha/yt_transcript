@@ -19,6 +19,8 @@
   var savedCount = document.getElementById("saved-count");
   var savedRefreshBtn = document.getElementById("saved-refresh-btn");
   var providerPicker = document.getElementById("provider-picker");
+  var autoCheckbox = document.getElementById("auto-summarize");
+  var autoNote = document.getElementById("auto-summarize-note");
   var summarizeBtn = document.getElementById("summarize-btn");
   var summarizeSpinner = document.getElementById("summarize-spinner");
   var summaryPanel = document.getElementById("summary-panel");
@@ -66,6 +68,9 @@
   var providers = [];
   var defaultProviderId = null;
   var providerOptions = [];
+  // The autoSummarize setting as last known to be persisted server-side:
+  // the revert target when a POST /api/settings write fails (design D6).
+  var persistedAutoSummarize = false;
 
   function setBusy(busy) {
     fetchBtn.disabled = busy;
@@ -105,6 +110,22 @@
     displayToken++; // invalidate any in-flight saved-summary load
     clearSummary();
     updateSummarizeEnabled();
+    // Auto-summarize hook: fresh fetches only (design D5) — the saved-
+    // transcript click path (displaySavedTranscript) never fires it.
+    maybeAutoSummarize(displayToken);
+  }
+
+  // With auto-summarize on, a fresh fetch first tries the saved-summary read
+  // for the derived name (the same load saved clicks use): a found summary
+  // is shown and the summarize call is skipped; otherwise the auto-fire
+  // targets the picker's default (design D5).
+  async function maybeAutoSummarize(token) {
+    if (!autoCheckbox.checked) return;
+    var shown = await loadSavedSummary(currentTranscriptName, token);
+    if (shown) return;
+    if (token !== displayToken) return; // transcript changed meanwhile
+    if (!autoCheckbox.checked) return; // the user turned it off meanwhile
+    doSummarize(true);
   }
 
   async function doFetch() {
@@ -346,6 +367,21 @@
   // URLs, so the picker never sees them. Every string enters the DOM via
   // textContent only.
 
+  // The option index the picker pre-selects: the default provider's first
+  // model, or the first option without a usable default. Shared with the
+  // auto-summarize path so both always agree on the default target
+  // (design D4).
+  function defaultOptionIndex() {
+    for (var k = 0; k < providerOptions.length; k++) {
+      if (providerOptions[k].provider === defaultProviderId) return k;
+    }
+    return 0;
+  }
+
+  function defaultSelection() {
+    return providerOptions.length ? providerOptions[defaultOptionIndex()] : null;
+  }
+
   function renderProviderPicker() {
     providerPicker.textContent = "";
     providerOptions = [];
@@ -360,14 +396,7 @@
     }
     // Pre-select the default provider's first model; without a usable
     // default, the first option.
-    var selectedIndex = 0;
-    for (var k = 0; k < providerOptions.length; k++) {
-      if (providerOptions[k].provider === defaultProviderId) {
-        selectedIndex = k;
-        break;
-      }
-    }
-    providerPicker.selectedIndex = selectedIndex;
+    providerPicker.selectedIndex = defaultOptionIndex();
   }
 
   async function loadProviders() {
@@ -385,9 +414,55 @@
     updateSummarizeEnabled();
   }
 
+  // --- auto-summarize setting ----------------------------------------------
+  // The checkbox reflects the server-persisted autoSummarize flag (loaded on
+  // page load, mirroring loadProviders: one read, no polling). Toggling posts
+  // the new value; on a failed write the checkbox reverts to the last known
+  // persisted value so the UI never claims a state the server does not hold
+  // (design D6). All strings enter the DOM via textContent only.
+
+  function updateAutoCheckbox() {
+    autoCheckbox.checked = persistedAutoSummarize;
+    // Interactive only when providers exist; disabled while summarizing (both
+    // handled by updateSummarizeEnabled below).
+    updateSummarizeEnabled();
+  }
+
+  async function loadSettings() {
+    try {
+      var res = await fetch("/api/settings");
+      if (!res.ok) return; // keep the off-default
+      var data = await res.json();
+      persistedAutoSummarize = data && data.autoSummarize === true;
+    } catch (_) {
+      persistedAutoSummarize = false;
+    }
+    updateAutoCheckbox();
+  }
+
+  autoCheckbox.addEventListener("change", async function () {
+    var next = autoCheckbox.checked;
+    try {
+      var res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoSummarize: next })
+      });
+      if (res.ok) {
+        persistedAutoSummarize = next; // server confirms the write
+      } else {
+        autoCheckbox.checked = persistedAutoSummarize; // revert (design D6)
+      }
+    } catch (_) {
+      autoCheckbox.checked = persistedAutoSummarize; // network failure: revert
+    }
+  });
+
   // Summarize is enabled only while a transcript is displayed and at least
   // one provider is configured; while a request is in flight the button and
-  // the picker are both disabled.
+  // the picker are both disabled. The auto-summarize checkbox needs
+  // providers to have a target but not a displayed transcript (it acts on
+  // the next fetch), and is disabled while any summarize is in flight.
   function updateSummarizeEnabled() {
     var enabled =
       !summarizing &&
@@ -395,6 +470,7 @@
       providerOptions.length > 0;
     summarizeBtn.disabled = !enabled;
     providerPicker.disabled = !enabled;
+    autoCheckbox.disabled = summarizing || providerOptions.length === 0;
   }
 
   function showSummaryPanel() {
@@ -408,14 +484,19 @@
     summaryTextEl.textContent = "";
     summaryPanel.hidden = true;
     summaryCopyBtn.disabled = true;
+    // The auto note belongs to the previous transcript's summary surface:
+    // any new transcript clears it (design D6).
+    clearAutoNote();
   }
 
-  // Best-effort load of a saved summary for a clicked saved transcript: a
-  // 404 or network error leaves the panel hidden and the page unaffected.
+  // Best-effort load of a saved summary: a 404 or network error leaves the
+  // panel hidden and the page unaffected (saved-transcript clicks) — the
+  // auto path reads the return value to decide between skip-and-show and
+  // auto-fire. Returns whether a summary was displayed.
   async function loadSavedSummary(name, token) {
     try {
       var res = await fetch("/api/transcripts/" + encodeURIComponent(name) + "/summary");
-      if (!res.ok) return;
+      if (!res.ok) return false;
       var data = null;
       try {
         data = await res.json();
@@ -423,13 +504,16 @@
         data = null;
       }
       // The transcript may have changed in the meantime: stale result.
-      if (token !== displayToken) return;
+      if (token !== displayToken) return false;
       if (data && typeof data.summary === "string" && data.summary) {
         currentSummary = data.summary;
         showSummaryPanel();
+        return true;
       }
+      return false;
     } catch (_) {
       // network failure: panel stays hidden, nothing else to do
+      return false;
     }
   }
 
@@ -450,15 +534,58 @@
     if (ok) showSummaryCopied();
   });
 
-  async function doSummarize() {
-    if (summarizeBtn.disabled || summarizing) return;
-    var selection = providerOptions[providerPicker.selectedIndex];
+  // --- auto-summarize note ----------------------------------------------------
+  // A subdued inline note for failed AUTOMATIC summarization (design D6):
+  // unasked-for red banners on every over-long or provider-down fetch would
+  // make the toggle unusable, so the auto path never calls showError and the
+  // manual banner path stays untouched. The note shows only from auto calls
+  // and clears with any new transcript (clearSummary), keeping the enabled
+  // manual Summarize button as the explicit retry affordance.
+
+  var AUTO_NOTE_MESSAGE =
+    "Auto-summarize could not produce a summary — use Summarize to retry.";
+
+  function showAutoNote() {
+    autoNote.textContent = AUTO_NOTE_MESSAGE;
+    autoNote.hidden = false;
+  }
+
+  function clearAutoNote() {
+    autoNote.textContent = "";
+    autoNote.hidden = true;
+  }
+
+  // One summarize path for both entry points. auto=false: the button click,
+  // using the picker's current selection and the error banner for failures.
+  // auto=true: the post-fetch auto-fire, using the default target (design D4)
+  // and the subdued note for every failure shape (design D6). Same busy
+  // state, same summarizing guard, same displayToken staleness rule.
+  async function doSummarize(auto) {
+    if (summarizing) {
+      // Accepted consecutive-fetch behavior (design D7): if a new fetch
+      // starts while an auto-summarize is in flight, this second auto-fire
+      // is dropped here and the first response is discarded by the
+      // displayToken rule, so the newest transcript gets no auto-summary.
+      // Queueing/re-firing would add state for a rare self-inflicted race
+      // in a single-user tool; manual Summarize is the retry path.
+      return;
+    }
+    var selection;
+    if (auto) {
+      selection = defaultSelection();
+    } else {
+      if (summarizeBtn.disabled) return;
+      selection = providerOptions[providerPicker.selectedIndex];
+    }
     if (!selection || !currentTranscript) return;
+    var token = displayToken;
     summarizing = true;
     summarizeSpinner.hidden = false;
     summarizeBtn.disabled = true;
     providerPicker.disabled = true;
-    clearError();
+    autoCheckbox.disabled = true;
+    clearAutoNote();
+    if (!auto) clearError();
     try {
       var res = await fetch("/api/summarize", {
         method: "POST",
@@ -477,6 +604,13 @@
         data = null;
       }
       if (!res.ok || !data || typeof data.summary !== "string") {
+        if (auto) {
+          // Staleness rule applies to the note too: never paint an old
+          // fetch's failure onto a newer transcript.
+          if (token !== displayToken) return;
+          showAutoNote();
+          return;
+        }
         var code = data && data.error ? data.error.code : null;
         var serverMessage = data && data.error ? data.error.message : null;
         showError(messageFor(code, serverMessage));
@@ -486,15 +620,28 @@
       // for display (same truthiness check as loadSavedSummary): show the
       // error region, never an empty panel.
       if (!data.summary) {
+        if (auto) {
+          if (token !== displayToken) return;
+          showAutoNote();
+          return;
+        }
         showError(
           "The summarization backend returned no summary text. Please try again."
         );
         return;
       }
+      // Staleness rule: a late response must not paint over a transcript
+      // displayed in the meantime.
+      if (token !== displayToken) return;
       currentSummary = data.summary;
       showSummaryPanel();
     } catch (_) {
-      showError("Network error — could not reach the server. Please try again.");
+      if (auto) {
+        if (token !== displayToken) return;
+        showAutoNote();
+      } else {
+        showError("Network error — could not reach the server. Please try again.");
+      }
     } finally {
       summarizing = false;
       summarizeSpinner.hidden = true;
@@ -502,7 +649,9 @@
     }
   }
 
-  summarizeBtn.addEventListener("click", doSummarize);
+  summarizeBtn.addEventListener("click", function () {
+    doSummarize(false);
+  });
 
   // --- log viewer -----------------------------------------------------------------
   // The server's structured log stream (SSE) is appended live as humanized
@@ -645,4 +794,5 @@
   // Load once on page load. There is no automatic polling (design decision 6).
   loadSavedList();
   loadProviders();
+  loadSettings();
 })();

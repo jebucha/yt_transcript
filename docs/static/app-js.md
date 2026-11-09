@@ -16,8 +16,9 @@ ids it requires from `index.html`: `url-input`, `fetch-form`, `fetch-btn`,
 `transcript-panel`, `copy-btn`, `download-btn`, `saved-list`, `saved-empty`,
 `saved-count`, `saved-refresh-btn`, `provider-picker`, `summarize-btn`,
 `summarize-spinner`, `summary-panel`, `summary-text`, `summary-copy-btn`,
-`log-panel`, `logs-toggle`. It also defines the `ERROR_MESSAGES` map (server
-error code → human message) for the nine taxonomy codes.
+`auto-summarize`, `auto-summarize-note`, `log-panel`, `logs-toggle`. It
+also defines the `ERROR_MESSAGES` map (server error code → human message)
+for the nine taxonomy codes.
 
 ## Invariants
 
@@ -35,13 +36,38 @@ error code → human message) for the nine taxonomy codes.
   fetch response's derived name, or the saved row's name) is what Summarize
   sends for the alongside save.
 - **`displayToken` invalidates stale results.** A monotonic token is bumped
-  on every new transcript display; an in-flight saved-summary response for a
-  previously displayed transcript is discarded.
-- **No polling.** The saved list and the provider list load once on page
-  load, the list also reloads after each successful fetch and via its
-  Refresh button. The provider list is never re-fetched (a stale picker
-  after a config edit gets a clean 400 `INVALID_PROVIDER` telling the user
-  to reload).
+  on every new transcript display; an in-flight saved-summary response or
+  summarize response for a previously displayed transcript is discarded.
+- **One summarize path, two entry points.** `doSummarize(auto)` serves the
+  manual click (`auto=false`: picker selection, error banner on failure) and
+  the post-fetch auto-fire (`auto=true`: the default target from
+  `defaultSelection()`, the subdued note on failure). Both share the
+  busy state (button, picker, and checkbox disabled + spinner), the
+  `summarizing` guard, and the token staleness rule.
+- **Auto-summarize fires on fresh fetches only.** The hook sits in
+  `renderResult`, never in the saved-transcript click path. With the
+  checkbox on it first reuses the saved-summary read: found → show it and
+  skip (no summarize call); otherwise fire `doSummarize(true)` against the
+  picker's default (`defaultSelection()`, the same target the picker
+  pre-selects). The accepted consecutive-fetch race drops the second
+  auto-fire via the `summarizing` guard (design D7).
+- **Auto failures never raise the banner.** Every automatic failure shape
+  (`PROVIDER_ERROR`, `NOT_CONFIGURED`, `INVALID_PROVIDER`, `INPUT_TOO_LONG`,
+  network error, empty-`summary` 200) shows the subdued `#auto-summarize-note`
+  (`textContent` only) and leaves the enabled Summarize button as the
+  explicit retry; the manual path keeps the banner untouched. The note
+  follows the same token staleness rule as the success path: a late failure
+  for a superseded transcript is dropped, never painted onto a newer one.
+- **The Auto-summarize checkbox mirrors the server setting.** Loaded once
+  on page load via `GET /api/settings` (no polling); toggling POSTs the
+  change and reverts the checkbox to the last persisted value if the write
+  fails. It is interactive only when providers are configured and is
+  disabled while any summarize is in flight.
+- **No polling.** The saved list, the provider list, and the settings load
+  once on page load, the list also reloads after each successful fetch and
+  via its Refresh button. The provider list is never re-fetched (a stale
+  picker after a config edit gets a clean 400 `INVALID_PROVIDER` telling
+  the user to reload).
 - **Copy works over plain HTTP.** `navigator.clipboard.writeText` first,
   falling back to a hidden-textarea `execCommand("copy")` — the Clipboard
   API does not exist in non-secure contexts, and plain HTTP is the normal
@@ -90,6 +116,12 @@ Resolved from the archived change design docs:
   `summarize_with_provider`).
 - `2026-11-03-add-log-viewer` **decision 6** — the panel shape, the
   `EventSource` opened once at page load, the formatters, the 200-line cap.
+- `add-auto-summarize` **D4** (`defaultSelection()` shared by the picker
+  pre-selection and the auto target), **D5** (`doSummarize(auto)` as one
+  code path, the hook after `renderResult` only, skip-and-show via the
+  saved-summary read), **D6** (subdued note for auto failures, checkbox
+  revert on a failed settings write), **D7** (accepted: a second auto-fire
+  during an in-flight summarize is dropped).
 
 ## Cross-links
 

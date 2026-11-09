@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/settings.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="settings.html" aria-current="page">app/settings.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/settings.py</code> — application settings</h1>
+<h2>Purpose</h2>
+<p>Reads and writes the durable application-level UI preference file
+(<code>settings.json</code> in the transcript directory) — the setting is read on
+<strong>every call</strong>, never at startup. Today the file holds one boolean,
+<code>autoSummarize</code>; the shape may grow fields later, nothing is designed ahead
+of need.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>load_settings() -&gt; Settings</code> — one settings read.</li>
+<li><code>save_settings(auto_summarize: bool) -&gt; bool</code> — atomic write; returns
+  whether it succeeded (never raises).</li>
+<li><code>settings_path() -&gt; Path</code> — resolves <code>settings.json</code> under
+  <code>persist.transcript_dir()</code> at call time.</li>
+<li><code>Settings</code> — frozen dataclass: <code>auto_summarize</code> (bool).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The reader and writer are pure over
+  <code>persist.transcript_dir()</code> so they are testable directly against
+  <code>tmp_path</code>, and never disagree with the transcript write/read side.</li>
+<li><strong>Read per call, never cached, never at startup.</strong> Edits on disk take
+  effect on the next request without a restart, and the app boots with no
+  settings file at all.</li>
+<li><strong>Safe off-default, never an exception.</strong> A missing file (the normal
+  state — no log), an unreadable file, malformed JSON, a non-object top
+  level, or a missing/non-boolean <code>autoSummarize</code> all return
+  <code>auto_summarize=False</code> without raising.</li>
+<li><strong>Malformed files are diagnosable but never echoed.</strong> An unreadable or
+  malformed file logs exactly one <code>settings_load_failed</code> error event
+  carrying the path and the parse/OS error detail — never the file's
+  contents.</li>
+<li><strong>Writes are atomic.</strong> <code>save_settings</code> writes a sibling temp file
+  (<code>settings.json.tmp</code>) and swaps it in with <code>os.replace</code>, so a crash
+  mid-write can never leave a truncated <code>settings.json</code> behind — the
+  setting is all-or-nothing. A stranded temp file is removed best-effort.</li>
+<li><strong>The file is invisible to the transcript library:</strong> the list endpoint
+  filters to <code>.txt</code>, and the settings endpoints never touch the fetch
+  chain or the single-flight semaphore.</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>settings_load_failed</code> (error): <code>path</code>, <code>reason</code> (<code>invalid_json</code>,
+  <code>invalid_structure</code>, or the OS exception type name), <code>detail</code> (the parse
+  error — never file contents).</li>
+<li><code>settings_save_failed</code> (error): <code>path</code>, <code>reason</code> (the OS exception type
+  name), <code>detail</code>.</li>
+</ul>
+<h2>Error codes raised/handled</h2>
+<p>None raised — a failed load degrades to the off-default; a failed write
+returns <code>False</code> and the endpoint maps that to <code>500 WRITE_FAILED</code> (plain
+HTTP, not a taxonomy entry).</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>add-auto-summarize</code>:</p>
+<ul>
+<li><strong>D2</strong> — settings live in <code>&lt;TRANSCRIPT_DIR&gt;/settings.json</code>: the durable,
+  host-mounted, already-writable volume, so the toggle survives container
+  rebuilds and is shared across browsers; not <code>localStorage</code> (per-browser)
+  and not <code>providers.json</code> (mounted read-only, provider config only).</li>
+<li><strong>D3</strong> — FastAPI-free module mirroring <code>providers.py</code>: per-request
+  reads, safe off-default, and a sibling-temp + <code>os.replace</code> write (the
+  all-or-nothing reading of a settings file rules out a plain overwrite).</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="persist.html"><code>persist.py</code></a> — <code>transcript_dir()</code>, the path this module shares</li>
+<li><a href="library.html"><code>library.py</code></a> — the <code>.txt</code>-only listing that ignores <code>settings.json</code></li>
+<li><a href="main.html"><code>main.py</code></a> — <code>GET /api/settings</code> / <code>POST /api/settings</code></li>
+<li><a href="static/app-js.html"><code>app/static/app.js</code></a> — the Auto-summarize toggle that consumes them</li>
+</ul>
+</main>
+</body>
+</html>

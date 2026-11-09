@@ -21,8 +21,9 @@ that map module results onto JSON responses.
   `_listen_port()`.
 - Endpoints: `POST /api/transcript`, `GET /api/transcripts`,
   `GET /api/transcripts/{name}`, `GET /api/transcripts/{name}/summary`,
-  `GET /api/providers`, `POST /api/summarize`, `GET /api/logs` (SSE), and
-  the static UI mounted at `/`.
+  `GET /api/providers`, `POST /api/summarize`, `GET /api/settings`,
+  `POST /api/settings`, `GET /api/logs` (SSE), and the static UI mounted
+  at `/`.
 
 ## Invariants
 
@@ -40,8 +41,8 @@ that map module results onto JSON responses.
   (`loop.run_in_executor` with `contextvars.copy_context().run`) so slow LLM
   calls never occupy the default executor shared by every other endpoint.
 - **Read endpoints never touch the fetch chain or its semaphore.** Listing,
-  reading transcripts/summaries, listing providers, and streaming logs are
-  all independent of in-flight fetches.
+  reading transcripts/summaries, listing providers, reading/writing the
+  settings, and streaming logs are all independent of in-flight fetches.
 - **Provider config is read per request** (never at startup); the
   `GET /api/providers` response is secret-free — API keys and base URLs never
   leave the server.
@@ -62,8 +63,11 @@ that map module results onto JSON responses.
 
 Catches `TranscriptError` from the chain and summarize modules and maps each
 to its `status`/`code`/`message` JSON envelope. Additionally returns
-`413 BODY_TOO_LARGE` (body-size middleware), `400 INVALID_NAME`, and
-`404 NOT_FOUND` (plain HTTP, not taxonomy entries).
+`413 BODY_TOO_LARGE` (body-size middleware), `400 INVALID_NAME`,
+`400 INVALID_BODY` / `500 WRITE_FAILED` (`POST /api/settings`), and
+`404 NOT_FOUND` (plain HTTP, not taxonomy entries). The settings body is
+validated before any filesystem access: a non-object body or a
+missing/non-boolean `autoSummarize` is rejected without touching the disk.
 
 ## Design decisions
 
@@ -88,6 +92,10 @@ Resolved from the archived change design docs:
   including the runtime note on why `run_in_executor` instead of
   `to_thread(executor=...)`), D2 (`limit_concurrency=100` in `main()`), D3
   (5 MiB `Content-Length` cap as outermost middleware).
+- `add-auto-summarize` D3 — `GET /api/settings` / `POST /api/settings` are
+  thin wrappers over `app/settings.py` via `asyncio.to_thread`; the body is
+  validated first, a write failure is `500 WRITE_FAILED`, and neither
+  endpoint touches the fetch chain or the single-flight semaphore.
 
 ## Cross-links
 
@@ -95,5 +103,6 @@ Resolved from the archived change design docs:
 - [`errors.py`](errors.html) — the error taxonomy it maps to HTTP
 - [`persist.py`](persist.html) / [`library.py`](library.html) — write and read side of transcripts
 - [`providers.py`](providers.html) / [`summarize.py`](summarize.html) — the summarization feature
+- [`settings.py`](settings.html) — the `GET`/`POST /api/settings` persistence
 - [`log.py`](log.html) / [`logbus.py`](logbus.html) — logging setup and the SSE source
 - [`app/static/app.js`](static/app-js.html) — the UI that consumes these endpoints

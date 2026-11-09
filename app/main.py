@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from queue import Empty
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,6 +35,7 @@ from app.library import (
 from app.log import get_logger
 from app.persist import derive_file_name, save_transcript
 from app.providers import load_providers
+from app.settings import load_settings, save_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
 DEFAULT_PORT = 8000
@@ -190,6 +191,52 @@ def create_app() -> FastAPI:
                 for p in config.providers
             ],
         }
+
+    @app.get("/api/settings")
+    async def settings_read_endpoint():
+        # Read settings.json per request (design D3): edits on disk take
+        # effect without a restart, and a missing/unusable file degrades to
+        # the safe off-default. Read-only and side-effect-free: it never
+        # touches the fetch chain or the single-flight semaphore, and blocking
+        # I/O runs off the event loop.
+        settings = await asyncio.to_thread(load_settings)
+        return {"autoSummarize": settings.auto_summarize}
+
+    @app.post("/api/settings")
+    async def settings_write_endpoint(request: Request):
+        # Validate the body before any filesystem access (design D3): a
+        # non-object body or a missing/non-boolean autoSummarize is a 400
+        # INVALID_BODY with no write. A write failure is a 500 WRITE_FAILED
+        # (save_settings already logged settings_save_failed). Never touches
+        # the fetch chain or the single-flight semaphore.
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": "INVALID_BODY",
+                                   "message": "Expected a JSON object with a "
+                                              "boolean autoSummarize field."}},
+            )
+        auto_summarize = body.get("autoSummarize")
+        if not isinstance(auto_summarize, bool):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": "INVALID_BODY",
+                                   "message": "autoSummarize must be a "
+                                              "boolean."}},
+            )
+        saved = await asyncio.to_thread(save_settings, auto_summarize)
+        if not saved:
+            return JSONResponse(
+                status_code=500,
+                content={"error": {"code": "WRITE_FAILED",
+                                   "message": "Could not save the settings "
+                                              "file."}},
+            )
+        return {"autoSummarize": auto_summarize}
 
     @app.get("/api/transcripts/{name}")
     async def read_transcript_endpoint(name: str):

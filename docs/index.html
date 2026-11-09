@@ -21,6 +21,7 @@
   <li><a href="library.html">app/library.py</a></li>
   <li><a href="providers.html">app/providers.py</a></li>
   <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="settings.html">app/settings.py</a></li>
   <li><a href="log.html">app/log.py</a></li>
   <li><a href="logbus.html">app/logbus.py</a></li>
   <li><a href="static/app-js.html">app/static/app.js</a></li>
@@ -79,11 +80,14 @@ app/persist.py  save_transcript   best-effort, worker thread
   |                                  dedicated 2-worker executor
   |
   |  GET /api/providers              app/providers.py - secret-free listing
+  |  GET /api/settings               app/settings.py  - read (off-default)
+  |  POST /api/settings              app/settings.py  - atomic write
   |  GET /api/logs (SSE)             app/logbus.py - 200-entry ring buffer
   v
 app/log.py  structlog: one JSON object per line -&gt; stdout
   (every module's events: server_*, http_request, fetch_*, *_saved,
-   summary_*, config_load_failed, unhandled_exception)
+   summary_*, config_load_failed, settings_load_failed,
+   settings_save_failed, unhandled_exception)
 
 app/errors.py - code + HTTP status + message; the taxonomy every failure
 maps to
@@ -150,6 +154,10 @@ providers.json.example → config shape for summarization providers
 <tr>
 <td><a href="summarize.html"><code>app/summarize.py</code></a></td>
 <td>provider invocation + summary file save/read</td>
+</tr>
+<tr>
+<td><a href="settings.html"><code>app/settings.py</code></a></td>
+<td>durable UI settings (<code>autoSummarize</code>) + save/read</td>
 </tr>
 <tr>
 <td><a href="log.html"><code>app/log.py</code></a></td>

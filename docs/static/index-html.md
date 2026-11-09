@@ -19,7 +19,10 @@ The effective API is the id/class contract with `app.js`:
 - Result: `error-banner`, `result`, `video-title`, `video-language`,
   `transcript-panel`, `copy-btn`, `download-btn`.
 - Summarization: `provider-picker`, `summarize-btn`, `summarize-spinner`,
-  `summary-panel`, `summary-text`, `summary-copy-btn`.
+  `summary-panel`, `summary-text`, `summary-copy-btn`, `auto-summarize`
+  (the Auto-summarize checkbox, inside its `auto-summarize-label`),
+  `auto-summarize-note` (the subdued inline failure note, hidden until an
+  automatic summarization fails).
 - Saved list: `saved-list`, `saved-empty`, `saved-count`,
   `saved-refresh-btn`.
 - Log viewer: `logs-toggle`, `log-panel`.
@@ -41,7 +44,8 @@ The effective API is the id/class contract with `app.js`:
   `tabindex="0"` on the scrollable `<pre>` panels, `type="button"` on
   non-submit buttons, `aria-hidden` on the spinners.
 - **Buttons start disabled where `app.js` requires it** (copy, download,
-  summarize, the provider picker); the script enables them as state allows.
+  summarize, the provider picker, and the auto-summarize checkbox); the
+  script enables them as state allows.
 - **The result section is hidden until the first transcript** — fresh fetch
   and saved-row display both render into this same single panel.
 
@@ -69,6 +73,9 @@ Resolved from the archived change design docs:
   the header (normal document flow, not an overlay), the column-of-rows
   header with `align-items: stretch`, and row-gap spacing replacing the old
   `margin-top` while the panel keeps its `max-height: 40vh` internal scroll.
+- `add-auto-summarize` **D6** — the `auto-summarize` checkbox next to the
+  provider picker and the hidden `auto-summarize-note` `<p>` beneath the
+  summarize actions (a muted inline note, not the error banner).
 
 ## Cross-links
 

@@ -21,6 +21,7 @@
   <li><a href="library.html">app/library.py</a></li>
   <li><a href="providers.html">app/providers.py</a></li>
   <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="settings.html">app/settings.py</a></li>
   <li><a href="log.html">app/log.py</a></li>
   <li><a href="logbus.html">app/logbus.py</a></li>
   <li><a href="static/app-js.html">app/static/app.js</a></li>
@@ -52,8 +53,9 @@ that map module results onto JSON responses.</p>
   <code>_listen_port()</code>.</li>
 <li>Endpoints: <code>POST /api/transcript</code>, <code>GET /api/transcripts</code>,
   <code>GET /api/transcripts/{name}</code>, <code>GET /api/transcripts/{name}/summary</code>,
-  <code>GET /api/providers</code>, <code>POST /api/summarize</code>, <code>GET /api/logs</code> (SSE), and
-  the static UI mounted at <code>/</code>.</li>
+  <code>GET /api/providers</code>, <code>POST /api/summarize</code>, <code>GET /api/settings</code>,
+  <code>POST /api/settings</code>, <code>GET /api/logs</code> (SSE), and the static UI mounted
+  at <code>/</code>.</li>
 </ul>
 <h2>Invariants</h2>
 <ul>
@@ -71,8 +73,8 @@ that map module results onto JSON responses.</p>
   (<code>loop.run_in_executor</code> with <code>contextvars.copy_context().run</code>) so slow LLM
   calls never occupy the default executor shared by every other endpoint.</li>
 <li><strong>Read endpoints never touch the fetch chain or its semaphore.</strong> Listing,
-  reading transcripts/summaries, listing providers, and streaming logs are
-  all independent of in-flight fetches.</li>
+  reading transcripts/summaries, listing providers, reading/writing the
+  settings, and streaming logs are all independent of in-flight fetches.</li>
 <li><strong>Provider config is read per request</strong> (never at startup); the
   <code>GET /api/providers</code> response is secret-free — API keys and base URLs never
   leave the server.</li>
@@ -90,8 +92,11 @@ that map module results onto JSON responses.</p>
 <h2>Error codes raised/handled</h2>
 <p>Catches <code>TranscriptError</code> from the chain and summarize modules and maps each
 to its <code>status</code>/<code>code</code>/<code>message</code> JSON envelope. Additionally returns
-<code>413 BODY_TOO_LARGE</code> (body-size middleware), <code>400 INVALID_NAME</code>, and
-<code>404 NOT_FOUND</code> (plain HTTP, not taxonomy entries).</p>
+<code>413 BODY_TOO_LARGE</code> (body-size middleware), <code>400 INVALID_NAME</code>,
+<code>400 INVALID_BODY</code> / <code>500 WRITE_FAILED</code> (<code>POST /api/settings</code>), and
+<code>404 NOT_FOUND</code> (plain HTTP, not taxonomy entries). The settings body is
+validated before any filesystem access: a non-object body or a
+missing/non-boolean <code>autoSummarize</code> is rejected without touching the disk.</p>
 <h2>Design decisions</h2>
 <p>Resolved from the archived change design docs:</p>
 <ul>
@@ -114,6 +119,10 @@ to its <code>status</code>/<code>code</code>/<code>message</code> JSON envelope.
   including the runtime note on why <code>run_in_executor</code> instead of
   <code>to_thread(executor=...)</code>), D2 (<code>limit_concurrency=100</code> in <code>main()</code>), D3
   (5 MiB <code>Content-Length</code> cap as outermost middleware).</li>
+<li><code>add-auto-summarize</code> D3 — <code>GET /api/settings</code> / <code>POST /api/settings</code> are
+  thin wrappers over <code>app/settings.py</code> via <code>asyncio.to_thread</code>; the body is
+  validated first, a write failure is <code>500 WRITE_FAILED</code>, and neither
+  endpoint touches the fetch chain or the single-flight semaphore.</li>
 </ul>
 <h2>Cross-links</h2>
 <ul>
@@ -121,6 +130,7 @@ to its <code>status</code>/<code>code</code>/<code>message</code> JSON envelope.
 <li><a href="errors.html"><code>errors.py</code></a> — the error taxonomy it maps to HTTP</li>
 <li><a href="persist.html"><code>persist.py</code></a> / <a href="library.html"><code>library.py</code></a> — write and read side of transcripts</li>
 <li><a href="providers.html"><code>providers.py</code></a> / <a href="summarize.html"><code>summarize.py</code></a> — the summarization feature</li>
+<li><a href="settings.html"><code>settings.py</code></a> — the <code>GET</code>/<code>POST /api/settings</code> persistence</li>
 <li><a href="log.html"><code>log.py</code></a> / <a href="logbus.html"><code>logbus.py</code></a> — logging setup and the SSE source</li>
 <li><a href="static/app-js.html"><code>app/static/app.js</code></a> — the UI that consumes these endpoints</li>
 </ul>

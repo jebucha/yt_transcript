@@ -14,8 +14,11 @@ Design tokens: `--bg`, `--panel`, `--text`, `--muted`, `--accent`,
 `index.html` / `app.js`: `.container` (the single 760px column),
 `.header` / `.header-row`, `.row`, `.url-input`, `.btn` / `.btn-quiet`,
 `.spinner`, `.error-banner`, `.result-*`, `.video-title`,
-`.video-language`, `.transcript-panel`, `.provider-picker`, `.summary-*`,
-`.saved-*` (`.saved-row` is the button-styled list item), `.log-panel`.
+`.video-language`, `.transcript-panel`, `.provider-picker`,
+`.auto-summarize-label` (the checkbox label; dims with the input's
+`:disabled` via `:has()`), `.auto-note` (the muted auto-summarize failure
+note), `.summary-*`, `.saved-*` (`.saved-row` is the button-styled list
+item), `.log-panel`.
 
 ## Invariants
 

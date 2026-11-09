@@ -21,6 +21,7 @@
   <li><a href="../library.html">app/library.py</a></li>
   <li><a href="../providers.html">app/providers.py</a></li>
   <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../settings.html">app/settings.py</a></li>
   <li><a href="../log.html">app/log.py</a></li>
   <li><a href="../logbus.html">app/logbus.py</a></li>
   <li><a href="app-js.html">app/static/app.js</a></li>
@@ -44,8 +45,11 @@ of any kind — the app's no-CDN constraint applies to CSS as firmly as to JS.</
 <code>index.html</code> / <code>app.js</code>: <code>.container</code> (the single 760px column),
 <code>.header</code> / <code>.header-row</code>, <code>.row</code>, <code>.url-input</code>, <code>.btn</code> / <code>.btn-quiet</code>,
 <code>.spinner</code>, <code>.error-banner</code>, <code>.result-*</code>, <code>.video-title</code>,
-<code>.video-language</code>, <code>.transcript-panel</code>, <code>.provider-picker</code>, <code>.summary-*</code>,
-<code>.saved-*</code> (<code>.saved-row</code> is the button-styled list item), <code>.log-panel</code>.</p>
+<code>.video-language</code>, <code>.transcript-panel</code>, <code>.provider-picker</code>,
+<code>.auto-summarize-label</code> (the checkbox label; dims with the input's
+<code>:disabled</code> via <code>:has()</code>), <code>.auto-note</code> (the muted auto-summarize failure
+note), <code>.summary-*</code>, <code>.saved-*</code> (<code>.saved-row</code> is the button-styled list
+item), <code>.log-panel</code>.</p>
 <h2>Invariants</h2>
 <ul>
 <li><strong>Self-contained.</strong> No <code>@import</code>, no web fonts, no external URLs; the

@@ -21,6 +21,7 @@
   <li><a href="../library.html">app/library.py</a></li>
   <li><a href="../providers.html">app/providers.py</a></li>
   <li><a href="../summarize.html">app/summarize.py</a></li>
+  <li><a href="../settings.html">app/settings.py</a></li>
   <li><a href="../log.html">app/log.py</a></li>
   <li><a href="../logbus.html">app/logbus.py</a></li>
   <li><a href="app-js.html">app/static/app.js</a></li>
@@ -49,7 +50,10 @@ The effective API is the id/class contract with <code>app.js</code>:</p>
 <li>Result: <code>error-banner</code>, <code>result</code>, <code>video-title</code>, <code>video-language</code>,
   <code>transcript-panel</code>, <code>copy-btn</code>, <code>download-btn</code>.</li>
 <li>Summarization: <code>provider-picker</code>, <code>summarize-btn</code>, <code>summarize-spinner</code>,
-  <code>summary-panel</code>, <code>summary-text</code>, <code>summary-copy-btn</code>.</li>
+  <code>summary-panel</code>, <code>summary-text</code>, <code>summary-copy-btn</code>, <code>auto-summarize</code>
+  (the Auto-summarize checkbox, inside its <code>auto-summarize-label</code>),
+  <code>auto-summarize-note</code> (the subdued inline failure note, hidden until an
+  automatic summarization fails).</li>
 <li>Saved list: <code>saved-list</code>, <code>saved-empty</code>, <code>saved-count</code>,
   <code>saved-refresh-btn</code>.</li>
 <li>Log viewer: <code>logs-toggle</code>, <code>log-panel</code>.</li>
@@ -71,7 +75,8 @@ The effective API is the id/class contract with <code>app.js</code>:</p>
   <code>tabindex="0"</code> on the scrollable <code>&lt;pre&gt;</code> panels, <code>type="button"</code> on
   non-submit buttons, <code>aria-hidden</code> on the spinners.</li>
 <li><strong>Buttons start disabled where <code>app.js</code> requires it</strong> (copy, download,
-  summarize, the provider picker); the script enables them as state allows.</li>
+  summarize, the provider picker, and the auto-summarize checkbox); the
+  script enables them as state allows.</li>
 <li><strong>The result section is hidden until the first transcript</strong> — fresh fetch
   and saved-row display both render into this same single panel.</li>
 </ul>
@@ -94,6 +99,9 @@ humanized server log lines.</p>
   the header (normal document flow, not an overlay), the column-of-rows
   header with <code>align-items: stretch</code>, and row-gap spacing replacing the old
   <code>margin-top</code> while the panel keeps its <code>max-height: 40vh</code> internal scroll.</li>
+<li><code>add-auto-summarize</code> <strong>D6</strong> — the <code>auto-summarize</code> checkbox next to the
+  provider picker and the hidden <code>auto-summarize-note</code> <code>&lt;p&gt;</code> beneath the
+  summarize actions (a muted inline note, not the error banner).</li>
 </ul>
 <h2>Cross-links</h2>
 <ul>

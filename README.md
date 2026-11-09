@@ -219,6 +219,20 @@ Every summarization is logged as `summary_completed` / `summary_failed`
 (structured logs and the in-browser log panel); a malformed config file
 logs `config_load_failed` and degrades to "not configured".
 
+**Auto-summarize.** The Auto-summarize checkbox beside the provider picker
+enables hands-free summarizing: after a successful *fresh fetch* whose
+transcript has no saved summary, the app immediately sends it to the
+default provider's first model (the same target the picker pre-selects)
+and displays the result. Clicking a saved transcript never auto-fires,
+and a re-fetch that already has a saved summary just shows it. Auto
+failures stay quiet — a subdued inline note instead of the red error
+banner — and manual Summarize stays the retry path. The toggle is
+interactive only when providers are configured. The setting persists
+server-side through `GET/POST /api/settings` (a `settings.json` file in
+the transcripts directory, shape `{"autoSummarize": true|false}`), so it
+survives reloads and container restarts; a failed write reverts the
+checkbox to the last persisted value.
+
 **Error messages.** `NOT_CONFIGURED` 503 — no usable providers found in the
 config file. `INVALID_PROVIDER` 400 — the picked provider or model is no
 longer in the config (reload the page after a config edit).

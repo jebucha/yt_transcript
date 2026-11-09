@@ -49,11 +49,14 @@ app/persist.py  save_transcript   best-effort, worker thread
   |                                  dedicated 2-worker executor
   |
   |  GET /api/providers              app/providers.py - secret-free listing
+  |  GET /api/settings               app/settings.py  - read (off-default)
+  |  POST /api/settings              app/settings.py  - atomic write
   |  GET /api/logs (SSE)             app/logbus.py - 200-entry ring buffer
   v
 app/log.py  structlog: one JSON object per line -> stdout
   (every module's events: server_*, http_request, fetch_*, *_saved,
-   summary_*, config_load_failed, unhandled_exception)
+   summary_*, config_load_failed, settings_load_failed,
+   settings_save_failed, unhandled_exception)
 
 app/errors.py - code + HTTP status + message; the taxonomy every failure
 maps to
@@ -90,6 +93,7 @@ providers.json.example → config shape for summarization providers
 | [`app/library.py`](library.html) | read side of saved transcripts (list + read) |
 | [`app/providers.py`](providers.html) | summarization provider config (read per request) |
 | [`app/summarize.py`](summarize.html) | provider invocation + summary file save/read |
+| [`app/settings.py`](settings.html) | durable UI settings (`autoSummarize`) + save/read |
 | [`app/log.py`](log.html) | structlog JSON-to-stdout setup |
 | [`app/logbus.py`](logbus.html) | in-memory ring buffer backing the SSE log viewer |
 
