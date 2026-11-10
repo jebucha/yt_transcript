@@ -1,6 +1,6 @@
 # yt-transcript — single-stage image, podman-compatible.
 # Final size: ~251 MB measured (podman build, arm64).
-FROM astral/uv:python3.13-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

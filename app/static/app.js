@@ -102,6 +102,7 @@
     currentTranscriptName = data.name || "";
     downloadBtn.disabled = true;
     titleEl.textContent = data.title || "";
+    titleEl.title = data.title || "";
     langEl.textContent = data.language ? "Language: " + data.language : "";
     panel.textContent = data.text;
     resultSection.hidden = false;
@@ -320,6 +321,7 @@
       currentSavedName = data.name;
       currentTranscriptName = data.name;
       titleEl.textContent = data.name;
+      titleEl.title = data.name || "";
       langEl.textContent = ""; // no language to show for a saved transcript
       panel.textContent = data.text;
       resultSection.hidden = false;

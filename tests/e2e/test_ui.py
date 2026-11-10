@@ -1,4 +1,4 @@
-"""E2E UI tests (T-WEB-INTERFACE-001 .. 014).
+"""E2E UI tests (T-WEB-INTERFACE-001 .. 017).
 
 A real uvicorn instance of the app runs in-process (thread) with the upstream
 fetch chain stubbed for determinism — no real YouTube traffic.
@@ -469,6 +469,98 @@ def test_busy_error_shown(page, server):
     # Drain the still-in-flight first fetch so the single-flight semaphore is
     # released before any later test issues a fetch (no cross-test BUSY).
     _wait_result(page)
+
+
+# --- T-WEB-INTERFACE-015 .. 017 ------------------------------------------------
+# Result header layout: the title owns a full-width line above the action
+# toolbar, clamped to two visible lines, and the toolbar wraps at narrow
+# viewports instead of overflowing.
+
+LONG_TITLE = "Supercalifragilistic expialidocious ".join(str(i) for i in range(15)).strip()
+assert len(LONG_TITLE) >= 300  # far longer than the header's ~728px usable width
+
+LONG_TITLE_PAYLOAD = dict(DEFAULT_PAYLOAD, title=LONG_TITLE)
+
+
+def test_long_title_stays_bounded(page, server):
+    """T-WEB-INTERFACE-015"""
+    server["stub"].set_success(payload=LONG_TITLE_PAYLOAD)
+
+    _fetch(page, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    _wait_result(page)
+
+    title = page.locator("#video-title")
+    assert title.inner_text() == LONG_TITLE
+
+    metrics = title.evaluate(
+        """el => ({
+             height: el.getBoundingClientRect().height,
+             lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+             scrollHeight: el.scrollHeight,
+             clientHeight: el.clientHeight,
+           })"""
+    )
+    # bounded to two visible lines (rounding tolerance per design D5)
+    assert metrics["lineHeight"] > 0
+    assert metrics["height"] <= 2 * metrics["lineHeight"] + 2
+    # actually clipped: the DOM-verifiable evidence of the clamp's truncation
+    assert metrics["scrollHeight"] > metrics["clientHeight"]
+
+    boxes = page.evaluate(
+        """() => ({
+             title: document.getElementById('video-title').getBoundingClientRect(),
+             copy: document.getElementById('copy-btn').getBoundingClientRect(),
+           })"""
+    )
+    # the title line sits above the action toolbar
+    assert boxes["title"]["bottom"] <= boxes["copy"]["top"]
+
+
+def test_long_title_tooltip(page, server):
+    """T-WEB-INTERFACE-016"""
+    server["stub"].set_success(payload=LONG_TITLE_PAYLOAD)
+
+    _fetch(page, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    _wait_result(page)
+
+    # the full untruncated title lives in both the DOM text and the tooltip
+    assert page.locator("#video-title").inner_text() == LONG_TITLE
+    assert page.locator("#video-title").get_attribute("title") == LONG_TITLE
+
+
+def test_result_actions_wrap_narrow(browser, server):
+    """T-WEB-INTERFACE-017"""
+    server["stub"].set_success()
+
+    context = browser.new_context(viewport={"width": 420, "height": 640})
+    narrow_page = context.new_page()
+    narrow_page.goto(server["localhost_base"] + "/")
+    try:
+        _fetch(narrow_page, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        _wait_result(narrow_page)
+
+        verdict = narrow_page.evaluate(
+            """() => {
+                 const vw = window.innerWidth, vh = window.innerHeight;
+                 return [...document.querySelectorAll('.result-actions > *')]
+                   .map(el => ({
+                     id: el.id,
+                     box: el.getBoundingClientRect().toJSON(),
+                     vw, vh,
+                   }));
+               }"""
+        )
+        assert verdict, "the toolbar must still render its controls"
+        for item in verdict:
+            box = item["box"]
+            assert 0 <= box["x"] and box["right"] <= item["vw"], (
+                f"#{item['id']} overflows horizontally: {box} vs viewport {item['vw']}"
+            )
+            assert box["bottom"] <= item["vh"], (
+                f"#{item['id']} overflows vertically: {box} vs viewport {item['vh']}"
+            )
+    finally:
+        context.close()
 
 
 # --- T-TRANSCRIPT-LIBRARY-016 .. 027 ------------------------------------------
