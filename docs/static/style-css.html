@@ -20,6 +20,8 @@
   <li><a href="../persist.html">app/persist.py</a></li>
   <li><a href="../library.html">app/library.py</a></li>
   <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../provider_overrides.html">app/provider_overrides.py</a></li>
+  <li><a href="../model_discovery.html">app/model_discovery.py</a></li>
   <li><a href="../summarize.html">app/summarize.py</a></li>
   <li><a href="../settings.html">app/settings.py</a></li>
   <li><a href="../log.html">app/log.py</a></li>
@@ -49,7 +51,12 @@ of any kind — the app's no-CDN constraint applies to CSS as firmly as to JS.</
 <code>.auto-summarize-label</code> (the checkbox label; dims with the input's
 <code>:disabled</code> via <code>:has()</code>), <code>.auto-note</code> (the muted auto-summarize failure
 note), <code>.summary-*</code>, <code>.saved-*</code> (<code>.saved-row</code> is the button-styled list
-item), <code>.log-panel</code>.</p>
+item), <code>.model-management-*</code> (the section, list container, and empty
+state), <code>.model-provider-*</code> (the button-styled row: name, count, manage),
+<code>.model-panel*</code> (the manage panel and its labeled groups),
+<code>.model-add-*</code> (the manual-add form), <code>.model-list*</code> (the model rows;
+<code>.model-list-id</code> is the monospace id text), <code>.model-item-btn*</code> (the small
+row buttons; <code>-remove</code> gets the error-color treatment), <code>.log-panel</code>.</p>
 <h2>Invariants</h2>
 <ul>
 <li><strong>Self-contained.</strong> No <code>@import</code>, no web fonts, no external URLs; the
@@ -67,13 +74,14 @@ item), <code>.log-panel</code>.</p>
   when hidden.</li>
 <li><strong>Every long region scrolls internally with a bounded height:</strong> the
   transcript panel <code>max-height: 60vh</code>, the summary text and saved list
-  <code>40vh</code>, the log panel <code>40vh</code> — opening any of them never grows the page
-  without bound.</li>
+  <code>40vh</code>, the log panel <code>40vh</code>, the model lists (added/discovered/config)
+  <code>30vh</code> — opening any of them never grows the page without bound.</li>
 <li><strong>Buttons are keyboard- and state-honest:</strong> <code>.btn:disabled</code> dims and
   forbids; <code>.saved-row</code> keeps <code>:focus-visible</code> outlines; hover states apply
   only to <code>:not(:disabled)</code>.</li>
 <li><strong>Long content wraps, never overflows:</strong> <code>overflow-wrap: anywhere</code> on
-  titles, transcript, saved names, and the log panel.</li>
+  titles, transcript, saved names, provider names, model ids, and the log
+  panel.</li>
 </ul>
 <h2>Log events emitted</h2>
 <p>None (markup-adjacent styles only).</p>
@@ -93,6 +101,11 @@ item), <code>.log-panel</code>.</p>
 <li><code>2026-11-06-move-log-panel-into-header</code> <strong>D2/D3</strong> — the column-of-rows
   header (<code>align-items: stretch</code> so rows span the full width) and the
   row-gap spacing that replaced the old <code>.log-panel { margin: 32px 0 0; }</code>.</li>
+<li><code>add-summarization-model-management</code> <strong>D7</strong> — the model-management
+  section's treatment: button-styled provider rows on the same border/
+  hover/focus recipe as <code>.saved-row</code>, the manage panel as a recessed
+  (<code>--bg</code>) group of labeled lists, monospace model ids, and the
+  error-colored Remove button.</li>
 </ul>
 <h2>Cross-links</h2>
 <ul>

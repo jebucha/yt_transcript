@@ -32,6 +32,9 @@ class Provider:
     base_url: str
     api_key: str | None
     models: tuple[str, ...]  # model ids in file order
+    # Model ids supplied by the overrides store, in order (design D2 of
+    # add-summarization-model-management). File-only reads leave it empty.
+    added_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

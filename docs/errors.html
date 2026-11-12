@@ -20,6 +20,8 @@
   <li><a href="persist.html">app/persist.py</a></li>
   <li><a href="library.html">app/library.py</a></li>
   <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="provider_overrides.html">app/provider_overrides.py</a></li>
+  <li><a href="model_discovery.html">app/model_discovery.py</a></li>
   <li><a href="summarize.html">app/summarize.py</a></li>
   <li><a href="settings.html">app/settings.py</a></li>
   <li><a href="log.html">app/log.py</a></li>
@@ -106,6 +108,18 @@ and map it to the JSON envelope <code>{"error": {"code", "message"}}</code>.</p>
 <td>400</td>
 <td>transcript over the 100,000-character cap</td>
 </tr>
+<tr>
+<td><code>InvalidModelError</code></td>
+<td><code>INVALID_MODEL</code></td>
+<td>400</td>
+<td>model id fails the add rules, or the per-provider addition cap is exceeded</td>
+</tr>
+<tr>
+<td><code>ModelNotRemovableError</code></td>
+<td><code>MODEL_NOT_REMOVABLE</code></td>
+<td>400</td>
+<td>remove requested for a config-file model (only overlay ids are removable)</td>
+</tr>
 </tbody>
 </table>
 <p>Plus <code>FALLBACK_CODES</code> — the frozenset of codes for which the chain makes a
@@ -123,16 +137,19 @@ fallback attempt: exactly <code>{"UPSTREAM_FAILURE"}</code>.</p>
   map by code and prefers it over the server message; the server message is
   the fallback. Wording changes ripple into the UI, so treat it as an API.</li>
 <li><strong>Not everything is a <code>TranscriptError</code>.</strong> The saved-transcript read
-  endpoints' <code>INVALID_NAME</code> (400) and <code>NOT_FOUND</code> (404) — and the body-size
-  middleware's <code>BODY_TOO_LARGE</code> (413) — are plain HTTP statuses returned
-  directly by <code>main.py</code>, deliberately outside this taxonomy.</li>
+  endpoints' <code>INVALID_NAME</code> (400) and <code>NOT_FOUND</code> (404), the model-management
+  endpoints' <code>INVALID_BODY</code> (400) and remove-side <code>NOT_FOUND</code> (404), and the
+  body-size middleware's <code>BODY_TOO_LARGE</code> (413) are plain HTTP statuses
+  returned directly by <code>main.py</code>, deliberately outside this taxonomy.</li>
 </ul>
 <h2>Log events emitted</h2>
 <p>None — errors are log payloads (e.g. <code>fetch_attempt</code> with <code>reason=&lt;code&gt;</code>),
 not log emitters.</p>
 <h2>Error codes raised/handled</h2>
 <p>All of the table above are defined here and raised by the fetch/summarize
-modules; <code>main.py</code> is the sole place they are translated to HTTP responses.</p>
+modules and the model-management store (<code>provider_overrides.py</code> raises
+<code>InvalidModelError</code> / <code>ModelNotRemovableError</code>); <code>main.py</code> is the sole place
+they are translated to HTTP responses.</p>
 <h2>Design decisions</h2>
 <p>Resolved from the archived change design docs:</p>
 <ul>

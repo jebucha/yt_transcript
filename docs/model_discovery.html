@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/model_discovery.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="provider_overrides.html">app/provider_overrides.py</a></li>
+  <li><a href="model_discovery.html" aria-current="page">app/model_discovery.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="settings.html">app/settings.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/model_discovery.py</code> — live model discovery</h1>
+<h2>Purpose</h2>
+<p>Discovers the models a configured provider actually serves by calling its
+OpenAI-compatible <code>GET {baseURL}/models</code> endpoint on demand — the backing
+call for <code>GET /api/providers/{id}/available-models</code>, which powers the UI's
+"Refresh from backend" affordance. Discovery is <strong>advisory</strong>: it only lists
+what the backend offers; the operator explicitly adds models (see
+<a href="provider_overrides.html"><code>provider_overrides.py</code></a>), and a failed discovery
+never alters the effective model list.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>list_models(provider, timeout=None) -&gt; list[str]</code> — one discovery call
+  for a file-config <code>Provider</code>; returns the discovered id strings.</li>
+<li><code>discovery_timeout() -&gt; float</code> — resolves <code>MODEL_DISCOVERY_TIMEOUT</code>
+  (default 15 s) at call time; non-numeric values fall back to the default.</li>
+<li><code>DEFAULT_DISCOVERY_TIMEOUT</code> (15.0) / <code>MAX_DISCOVERED_MODELS</code> (200).</li>
+<li><code>ModelDiscoveryError</code> — the failure signal with a machine-readable
+  <code>reason</code> and a safe <code>detail</code>.</li>
+<li><code>_get_provider_models(base_url, api_key, timeout) -&gt; dict</code> — the HTTP
+  seam (the test double point, mirroring <code>summarize._call_chat_completions</code>).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The call is a plain synchronous function meant to
+  be run in a worker thread; the endpoint runs it on its own bounded pool
+  (<code>DISCOVERY_EXECUTOR</code>, 2 workers) — separate from the summarization pool
+  so a hanging <code>/models</code> call cannot starve summarization and vice versa.</li>
+<li><strong>Only operator-configured base URLs are contacted.</strong> The endpoint
+  resolves the provider against the read-only file config first; the overlay
+  never changes which URL discovery hits. No other URL is ever reachable
+  through this endpoint.</li>
+<li><strong>Bearer token only when a key is configured.</strong> The <code>Authorization</code> header
+  is attached only when the provider defines an <code>apiKey</code> (keyless local
+  backends get none).</li>
+<li><strong>Secrets never leave the server.</strong> The response is a bare <code>models</code> array
+  of id strings; no base URL, no API key. Log details are type names and
+  app-constructed reasons — never the URL or the response body.</li>
+<li><strong>Strict parsing, bounded output.</strong> Only dict entries of the <code>data</code> array
+  with a non-empty string <code>id</code> are kept; duplicates are removed preserving
+  first occurrence; the result is capped at 200 ids.</li>
+<li><strong>Every failure is a 502 <code>PROVIDER_ERROR</code></strong> with a machine-readable
+  reason (<code>unreachable</code>, <code>timeout</code>, <code>http_error</code>, <code>malformed_response</code> — the
+  same taxonomy as the summarization call).</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>provider_models_refreshed</code> (info): <code>provider</code>, <code>count</code>, <code>duration_ms</code>.</li>
+<li><code>provider_models_refresh_failed</code> (error): <code>provider</code>, <code>reason</code>
+  (machine-readable), <code>detail</code> (safe), <code>duration_ms</code>.</li>
+</ul>
+<p>Exactly one of the two per call.</p>
+<h2>Error codes raised/handled</h2>
+<p><code>ProviderError</code> (<code>PROVIDER_ERROR</code> 502) on any backend failure; the endpoint
+maps an unknown provider id to <code>InvalidProviderError</code> (<code>INVALID_PROVIDER</code>
+400) before any network call.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>add-summarization-model-management</code>:</p>
+<ul>
+<li><strong>D6</strong> — a separate FastAPI-free module with a replaceable HTTP seam, a
+  bounded 15 s timeout (<code>MODEL_DISCOVERY_TIMEOUT</code>), a dedicated 2-worker
+  executor, strict <code>data[].id</code> parsing with dedupe/cap, and secret-free
+  failure reporting.</li>
+<li><strong>D6 (rejected alternative)</strong> — auto-adding every discovered model was
+  rejected: discovery is advisory, so an unexpected backend cannot silently
+  expand the picker. Manual entry always works as the fallback when a
+  provider has no <code>/models</code> endpoint.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="providers.html"><code>providers.py</code></a> — the file config the provider is resolved against</li>
+<li><a href="provider_overrides.html"><code>provider_overrides.py</code></a> — the overlay the UI adds discovered ids to</li>
+<li><a href="summarize.html"><code>summarize.py</code></a> — the sibling backend call whose seam and failure taxonomy this mirrors</li>
+<li><a href="main.html"><code>main.py</code></a> — <code>GET /api/providers/{id}/available-models</code></li>
+<li><a href="errors.html"><code>errors.py</code></a> — <code>PROVIDER_ERROR</code> / <code>INVALID_PROVIDER</code></li>
+</ul>
+</main>
+</body>
+</html>

@@ -20,6 +20,8 @@
   <li><a href="persist.html">app/persist.py</a></li>
   <li><a href="library.html">app/library.py</a></li>
   <li><a href="providers.html" aria-current="page">app/providers.py</a></li>
+  <li><a href="provider_overrides.html">app/provider_overrides.py</a></li>
+  <li><a href="model_discovery.html">app/model_discovery.py</a></li>
   <li><a href="summarize.html">app/summarize.py</a></li>
   <li><a href="settings.html">app/settings.py</a></li>
   <li><a href="log.html">app/log.py</a></li>
@@ -45,7 +47,9 @@ structure of usable providers plus the default provider id, or the empty
 <li><code>config_path() -&gt; Path</code> — resolves <code>PROVIDERS_CONFIG</code> (default
   <code>providers.json</code> in the working directory) at call time.</li>
 <li><code>Provider</code> — frozen dataclass: <code>id</code>, <code>name</code> (display, falls back to the
-  id), <code>base_url</code>, <code>api_key</code> (optional), <code>models</code> (tuple of ids, file order).</li>
+  id), <code>base_url</code>, <code>api_key</code> (optional), <code>models</code> (tuple of ids, file
+  order), and <code>added_models</code> (tuple of overlay-supplied ids; empty for
+  file-only reads).</li>
 <li><code>ProviderConfig</code> — frozen dataclass: <code>providers</code> (tuple) + <code>default</code>
   (id or <code>None</code>).</li>
 </ul>
@@ -92,11 +96,35 @@ endpoint turns that into <code>NOT_CONFIGURED</code> 503.</p>
 <li><strong>decision 13</strong> — logging discipline: parse error detail only, never file
   contents; a missing file is not a logged failure.</li>
 </ul>
+<h2>The writable overlay (provider_overrides.json)</h2>
+<p>This file is <strong>operator-owned and read-only</strong> (compose mounts it
+read-only); the app never writes it. UI-added model ids do not go here —
+they live in a separate writable overlay, <code>provider_overrides.json</code> in the
+transcript directory, owned by <a href="provider_overrides.html"><code>provider_overrides.py</code></a>
+(shape <code>{"&lt;providerId&gt;": ["model-id", ...]}</code>). The effective provider list
+the endpoints see is the merge of the two, per request:</p>
+<ul>
+<li>the provider set comes <strong>only</strong> from this config file — the overlay can
+  never introduce a provider, a base URL, or an API key, and entries for
+  unknown provider ids are ignored;</li>
+<li>a provider's effective models are its config-file models in file order,
+  followed by its non-duplicate overlay ids, and the overlay ids actually
+  used are carried on <code>Provider.added_models</code> (the <code>addedModels</code> field of
+  <code>GET /api/providers</code>);</li>
+<li>a missing or malformed overlay file means "no additions" (it degrades to
+  exactly this file's models, logging <code>provider_overrides_load_failed</code>), so
+  with no overlay the behavior is the file-only behavior exactly.</li>
+</ul>
+<p><code>load_providers()</code> stays file-only; the endpoints compose
+<code>apply_overrides(load_providers(), load_overrides())</code> (see
+<a href="provider_overrides.html"><code>provider_overrides.py</code></a>).</p>
 <h2>Cross-links</h2>
 <ul>
+<li><a href="provider_overrides.html"><code>provider_overrides.py</code></a> — the writable model overlay merged over this config</li>
+<li><a href="model_discovery.html"><code>model_discovery.py</code></a> — live discovery of a provider's <code>/models</code></li>
 <li><a href="summarize.html"><code>summarize.py</code></a> — consumes <code>Provider</code> for the backend call</li>
-<li><a href="main.html"><code>main.py</code></a> — <code>GET /api/providers</code> (secret-free listing) and the per-request reads</li>
-<li><a href="errors.html"><code>errors.py</code></a> — <code>NOT_CONFIGURED</code> / <code>INVALID_PROVIDER</code></li>
+<li><a href="main.html"><code>main.py</code></a> — <code>GET /api/providers</code> (secret-free listing), the add/remove/discover endpoints, and the per-request reads</li>
+<li><a href="errors.html"><code>errors.py</code></a> — <code>NOT_CONFIGURED</code> / <code>INVALID_PROVIDER</code> / <code>INVALID_MODEL</code> / <code>MODEL_NOT_REMOVABLE</code></li>
 </ul>
 </main>
 </body>

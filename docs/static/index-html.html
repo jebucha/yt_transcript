@@ -20,6 +20,8 @@
   <li><a href="../persist.html">app/persist.py</a></li>
   <li><a href="../library.html">app/library.py</a></li>
   <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../provider_overrides.html">app/provider_overrides.py</a></li>
+  <li><a href="../model_discovery.html">app/model_discovery.py</a></li>
   <li><a href="../summarize.html">app/summarize.py</a></li>
   <li><a href="../settings.html">app/settings.py</a></li>
   <li><a href="../log.html">app/log.py</a></li>
@@ -38,8 +40,9 @@
 <p>The entire web UI's markup: one page, no framework, no build step, no CDN.
 It defines the DOM contract that <code>app.js</code> consumes — every id the script
 reaches for — and the visible structure: header (with the log viewer), the
-fetch form, the error banner, the result section (transcript panel +
-summary panel), and the saved-transcripts section.</p>
+fetch form, the error banner, the always-visible Summarization models
+section, the result section (transcript panel + summary panel), and the
+saved-transcripts section.</p>
 <h2>Public surface</h2>
 <p>The asset set is exactly three files referenced with absolute paths:
 <code>/style.css</code>, <code>/app.js</code>, and this page (served by the static mount at <code>/</code>).
@@ -56,6 +59,11 @@ The effective API is the id/class contract with <code>app.js</code>:</p>
   automatic summarization fails).</li>
 <li>Saved list: <code>saved-list</code>, <code>saved-empty</code>, <code>saved-count</code>,
   <code>saved-refresh-btn</code>.</li>
+<li>Model management: <code>model-management</code> (the section),
+  <code>model-management-title</code>, <code>model-management-list</code> (the per-provider
+  container <code>app.js</code> fills), <code>model-management-empty</code> (the empty state).
+  The per-provider rows and manage panels are built by <code>app.js</code>; this
+  markup only provides the heading and the containers.</li>
 <li>Log viewer: <code>logs-toggle</code>, <code>log-panel</code>.</li>
 </ul>
 <h2>Invariants</h2>
@@ -79,6 +87,10 @@ The effective API is the id/class contract with <code>app.js</code>:</p>
   script enables them as state allows.</li>
 <li><strong>The result section is hidden until the first transcript</strong> — fresh fetch
   and saved-row display both render into this same single panel.</li>
+<li><strong>The model-management section is always visible</strong>, between the error
+  banner and <code>#result</code>, before any transcript is fetched. Its list container
+  and empty state both start <code>hidden</code>; <code>app.js</code> shows exactly one of them
+  per provider-list load.</li>
 </ul>
 <h2>Log events emitted</h2>
 <p>None (markup). The <code>log-panel</code> <code>&lt;pre&gt;</code> is where <code>app.js</code> appends the
@@ -102,12 +114,21 @@ humanized server log lines.</p>
 <li><code>add-auto-summarize</code> <strong>D6</strong> — the <code>auto-summarize</code> checkbox next to the
   provider picker and the hidden <code>auto-summarize-note</code> <code>&lt;p&gt;</code> beneath the
   summarize actions (a muted inline note, not the error banner).</li>
+<li><code>add-summarization-model-management</code> <strong>D7</strong> — the always-visible
+  <code>#model-management</code> section below the fetch form (outside the result
+  toolbar, so it does not interact with the result-header layout): heading,
+  list container, and empty state in the markup; the per-provider rows and
+  manage panels are built by <code>app.js</code> from <code>GET /api/providers</code>.</li>
 </ul>
 <h2>Cross-links</h2>
 <ul>
 <li><a href="app-js.html"><code>app.js</code></a> — the script that owns the behavior</li>
 <li><a href="style-css.html"><code>style.css</code></a> — the stylesheet that owns the look</li>
 <li><a href="../main.html"><code>main.html</code></a> — the static mount that serves this file</li>
+<li><a href="../provider_overrides.html"><code>provider_overrides.html</code></a> — the overlay the
+  model-management section writes through its endpoints</li>
+<li><a href="../model_discovery.html"><code>model_discovery.html</code></a> — the backend "Refresh
+  from backend" flow the manage panels trigger</li>
 </ul>
 </main>
 </body>

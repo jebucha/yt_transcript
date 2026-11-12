@@ -23,6 +23,8 @@ and map it to the JSON envelope `{"error": {"code", "message"}}`.
 | `InvalidProviderError` | `INVALID_PROVIDER` | 400 | provider/model no longer in the config |
 | `ProviderError` | `PROVIDER_ERROR` | 502 | the summarization backend failed |
 | `InputTooLongError` | `INPUT_TOO_LONG` | 400 | transcript over the 100,000-character cap |
+| `InvalidModelError` | `INVALID_MODEL` | 400 | model id fails the add rules, or the per-provider addition cap is exceeded |
+| `ModelNotRemovableError` | `MODEL_NOT_REMOVABLE` | 400 | remove requested for a config-file model (only overlay ids are removable) |
 
 Plus `FALLBACK_CODES` — the frozenset of codes for which the chain makes a
 fallback attempt: exactly `{"UPSTREAM_FAILURE"}`.
@@ -40,9 +42,10 @@ fallback attempt: exactly `{"UPSTREAM_FAILURE"}`.
   map by code and prefers it over the server message; the server message is
   the fallback. Wording changes ripple into the UI, so treat it as an API.
 - **Not everything is a `TranscriptError`.** The saved-transcript read
-  endpoints' `INVALID_NAME` (400) and `NOT_FOUND` (404) — and the body-size
-  middleware's `BODY_TOO_LARGE` (413) — are plain HTTP statuses returned
-  directly by `main.py`, deliberately outside this taxonomy.
+  endpoints' `INVALID_NAME` (400) and `NOT_FOUND` (404), the model-management
+  endpoints' `INVALID_BODY` (400) and remove-side `NOT_FOUND` (404), and the
+  body-size middleware's `BODY_TOO_LARGE` (413) are plain HTTP statuses
+  returned directly by `main.py`, deliberately outside this taxonomy.
 
 ## Log events emitted
 
@@ -52,7 +55,9 @@ not log emitters.
 ## Error codes raised/handled
 
 All of the table above are defined here and raised by the fetch/summarize
-modules; `main.py` is the sole place they are translated to HTTP responses.
+modules and the model-management store (`provider_overrides.py` raises
+`InvalidModelError` / `ModelNotRemovableError`); `main.py` is the sole place
+they are translated to HTTP responses.
 
 ## Design decisions
 

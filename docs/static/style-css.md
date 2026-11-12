@@ -18,7 +18,12 @@ Design tokens: `--bg`, `--panel`, `--text`, `--muted`, `--accent`,
 `.auto-summarize-label` (the checkbox label; dims with the input's
 `:disabled` via `:has()`), `.auto-note` (the muted auto-summarize failure
 note), `.summary-*`, `.saved-*` (`.saved-row` is the button-styled list
-item), `.log-panel`.
+item), `.model-management-*` (the section, list container, and empty
+state), `.model-provider-*` (the button-styled row: name, count, manage),
+`.model-panel*` (the manage panel and its labeled groups),
+`.model-add-*` (the manual-add form), `.model-list*` (the model rows;
+`.model-list-id` is the monospace id text), `.model-item-btn*` (the small
+row buttons; `-remove` gets the error-color treatment), `.log-panel`.
 
 ## Invariants
 
@@ -37,13 +42,14 @@ item), `.log-panel`.
   when hidden.
 - **Every long region scrolls internally with a bounded height:** the
   transcript panel `max-height: 60vh`, the summary text and saved list
-  `40vh`, the log panel `40vh` — opening any of them never grows the page
-  without bound.
+  `40vh`, the log panel `40vh`, the model lists (added/discovered/config)
+  `30vh` — opening any of them never grows the page without bound.
 - **Buttons are keyboard- and state-honest:** `.btn:disabled` dims and
   forbids; `.saved-row` keeps `:focus-visible` outlines; hover states apply
   only to `:not(:disabled)`.
 - **Long content wraps, never overflows:** `overflow-wrap: anywhere` on
-  titles, transcript, saved names, and the log panel.
+  titles, transcript, saved names, provider names, model ids, and the log
+  panel.
 
 ## Log events emitted
 
@@ -68,6 +74,11 @@ Resolved from the archived change design docs:
 - `2026-11-06-move-log-panel-into-header` **D2/D3** — the column-of-rows
   header (`align-items: stretch` so rows span the full width) and the
   row-gap spacing that replaced the old `.log-panel { margin: 32px 0 0; }`.
+- `add-summarization-model-management` **D7** — the model-management
+  section's treatment: button-styled provider rows on the same border/
+  hover/focus recipe as `.saved-row`, the manage panel as a recessed
+  (`--bg`) group of labeled lists, monospace model ids, and the
+  error-colored Remove button.
 
 ## Cross-links
 

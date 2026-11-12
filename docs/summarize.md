@@ -85,6 +85,8 @@ Resolved from `add-transcript-summary`:
 ## Cross-links
 
 - [`providers.py`](providers.html) — the config that supplies the `Provider`
+- [`model_discovery.py`](model_discovery.html) — the sibling `/models` call that mirrors this seam and failure taxonomy
+- [`provider_overrides.py`](provider_overrides.html) — the overlay the discovered ids get added to
 - [`main.py`](main.html) — the bounded executor and validation order
 - [`library.py`](library.html) — the read-side discipline `read_summary` mirrors
 - [`persist.py`](persist.html) — the sibling writer in the same directory

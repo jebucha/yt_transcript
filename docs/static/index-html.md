@@ -5,8 +5,9 @@
 The entire web UI's markup: one page, no framework, no build step, no CDN.
 It defines the DOM contract that `app.js` consumes — every id the script
 reaches for — and the visible structure: header (with the log viewer), the
-fetch form, the error banner, the result section (transcript panel +
-summary panel), and the saved-transcripts section.
+fetch form, the error banner, the always-visible Summarization models
+section, the result section (transcript panel + summary panel), and the
+saved-transcripts section.
 
 ## Public surface
 
@@ -25,6 +26,11 @@ The effective API is the id/class contract with `app.js`:
   automatic summarization fails).
 - Saved list: `saved-list`, `saved-empty`, `saved-count`,
   `saved-refresh-btn`.
+- Model management: `model-management` (the section),
+  `model-management-title`, `model-management-list` (the per-provider
+  container `app.js` fills), `model-management-empty` (the empty state).
+  The per-provider rows and manage panels are built by `app.js`; this
+  markup only provides the heading and the containers.
 - Log viewer: `logs-toggle`, `log-panel`.
 
 ## Invariants
@@ -48,6 +54,10 @@ The effective API is the id/class contract with `app.js`:
   script enables them as state allows.
 - **The result section is hidden until the first transcript** — fresh fetch
   and saved-row display both render into this same single panel.
+- **The model-management section is always visible**, between the error
+  banner and `#result`, before any transcript is fetched. Its list container
+  and empty state both start `hidden`; `app.js` shows exactly one of them
+  per provider-list load.
 
 ## Log events emitted
 
@@ -76,9 +86,18 @@ Resolved from the archived change design docs:
 - `add-auto-summarize` **D6** — the `auto-summarize` checkbox next to the
   provider picker and the hidden `auto-summarize-note` `<p>` beneath the
   summarize actions (a muted inline note, not the error banner).
+- `add-summarization-model-management` **D7** — the always-visible
+  `#model-management` section below the fetch form (outside the result
+  toolbar, so it does not interact with the result-header layout): heading,
+  list container, and empty state in the markup; the per-provider rows and
+  manage panels are built by `app.js` from `GET /api/providers`.
 
 ## Cross-links
 
 - [`app.js`](app-js.html) — the script that owns the behavior
 - [`style.css`](style-css.html) — the stylesheet that owns the look
 - [`main.html`](../main.html) — the static mount that serves this file
+- [`provider_overrides.html`](../provider_overrides.html) — the overlay the
+  model-management section writes through its endpoints
+- [`model_discovery.html`](../model_discovery.html) — the backend "Refresh
+  from backend" flow the manage panels trigger

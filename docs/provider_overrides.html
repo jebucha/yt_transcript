@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>app/provider_overrides.py — yt-transcript code docs</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="sidebar">
+<h1>yt-transcript docs</h1>
+<ul>
+  <li><a href="index.html">index</a></li>
+  <li><a href="__init__.html">app/__init__.py</a></li>
+  <li><a href="main.html">app/main.py</a></li>
+  <li><a href="chain.html">app/chain.py</a></li>
+  <li><a href="fetchers.html">app/fetchers.py</a></li>
+  <li><a href="urls.html">app/urls.py</a></li>
+  <li><a href="errors.html">app/errors.py</a></li>
+  <li><a href="persist.html">app/persist.py</a></li>
+  <li><a href="library.html">app/library.py</a></li>
+  <li><a href="providers.html">app/providers.py</a></li>
+  <li><a href="provider_overrides.html" aria-current="page">app/provider_overrides.py</a></li>
+  <li><a href="model_discovery.html">app/model_discovery.py</a></li>
+  <li><a href="summarize.html">app/summarize.py</a></li>
+  <li><a href="settings.html">app/settings.py</a></li>
+  <li><a href="log.html">app/log.py</a></li>
+  <li><a href="logbus.html">app/logbus.py</a></li>
+  <li><a href="static/app-js.html">app/static/app.js</a></li>
+  <li><a href="static/index-html.html">app/static/index.html</a></li>
+  <li><a href="static/style-css.html">app/static/style.css</a></li>
+  <li><a href="deploy/Dockerfile.html">Dockerfile</a></li>
+  <li><a href="deploy/compose-yml.html">docker-compose.yml</a></li>
+  <li><a href="providers-json-example.html">providers.json.example</a></li>
+</ul>
+</nav>
+<main class="content">
+<h1><code>app/provider_overrides.py</code> — provider model overlay</h1>
+<h2>Purpose</h2>
+<p>Reads and writes the writable model-overlay file
+(<code>provider_overrides.json</code> in the transcript directory) that holds the model
+ids the operator adds through the web UI. The file is read on <strong>every
+call</strong>, never at startup, and merged over the read-only
+<a href="providers.html"><code>providers.json</code></a> config into the effective provider list
+the endpoints serve and validate against. The overlay shape is
+<code>{"&lt;providerId&gt;": ["model-id", ...]}</code>.</p>
+<h2>Public surface</h2>
+<ul>
+<li><code>load_overrides() -&gt; dict[str, list[str]]</code> — one overlay read
+  (provider id → model ids, file order).</li>
+<li><code>apply_overrides(config, overrides) -&gt; ProviderConfig</code> — pure merge: file
+  models first, appended non-duplicate overlay ids, provenance in
+  <code>Provider.added_models</code>.</li>
+<li><code>add_model(provider, model_id) -&gt; list[str] | None</code> — locked, atomic
+  read-modify-write add; returns the effective model list, or <code>None</code> on a
+  failed write.</li>
+<li><code>remove_model(provider, model_id) -&gt; list[str] | None</code> — locked, atomic
+  remove of an overlay id; returns the remaining effective list, or <code>None</code>
+  on a failed write.</li>
+<li><code>is_valid_model_id(model_id) -&gt; bool</code> — the id rules (design D5).</li>
+<li><code>overrides_path() -&gt; Path</code> — resolves the overlay file under
+  <code>persist.transcript_dir()</code> at call time.</li>
+<li><code>MAX_MODEL_ID_CHARS</code> (200) / <code>MAX_ADDED_PER_PROVIDER</code> (50) — the bounds.</li>
+<li><code>ModelNotFoundError</code> — the remove-side 404 signal (plain HTTP status,
+  deliberately outside the <a href="errors.html"><code>errors</code></a> taxonomy).</li>
+</ul>
+<h2>Invariants</h2>
+<ul>
+<li><strong>No FastAPI imports.</strong> The reader, merge, and writer are pure over
+  <code>persist.transcript_dir()</code> so they are testable directly against
+  <code>tmp_path</code>, mirroring <code>providers.py</code> and <code>settings.py</code>.</li>
+<li><strong>Read per call, never cached, never at startup.</strong> Edits on disk (by hand
+  or by the endpoints) take effect on the next request without a restart,
+  and the app boots with no overlay file at all.</li>
+<li><strong>A missing file is the normal "no additions" state</strong> — an empty result
+  with <em>no</em> log entry. An unreadable file, malformed JSON, or a non-object
+  top level degrades to no additions <strong>without raising</strong> and logs exactly
+  one <code>provider_overrides_load_failed</code> error event.</li>
+<li><strong>The overlay never widens the trust boundary.</strong> It only extends the model
+  list of providers defined in the config file: no new providers, base
+  URLs, or API keys; entries for unknown provider ids are ignored (and left
+  on disk — no destructive prune).</li>
+<li><strong>Merge order is fixed:</strong> config-file models in file order, then overlay
+  ids not already present (first occurrence kept). <code>added_models</code> carries
+  only the overlay ids actually used, in the same order they appear in
+  <code>models</code>.</li>
+<li><strong>Writes are atomic and locked.</strong> <code>add_model</code> / <code>remove_model</code> run the
+  read-modify-write under a module-level lock (the app is single-process; a
+  multi-process deployment would need an OS file lock — documented
+  non-goal) and persist via a sibling temp file + <code>os.replace</code>, so a crash
+  mid-write never leaves a truncated file and a failure never leaves partial
+  state.</li>
+<li><strong>Model id bounds (design D5):</strong> a trimmed, non-empty id of at most 200
+  characters, free of control characters, at most 50 overlay additions per
+  provider.</li>
+<li><strong>Secret discipline.</strong> No event carries an API key, a base URL, or the
+  file's contents — only paths, machine-readable reasons, and OS/parse
+  error details.</li>
+</ul>
+<h2>Log events emitted</h2>
+<ul>
+<li><code>provider_overrides_load_failed</code> (error): <code>path</code>, <code>reason</code>
+  (<code>invalid_json</code>, <code>invalid_structure</code>, or the OS exception type name),
+  <code>detail</code> (the parse error — never file contents).</li>
+<li><code>provider_overrides_save_failed</code> (error): <code>path</code>, <code>reason</code> (the OS
+  exception type name), <code>detail</code>.</li>
+<li><code>provider_model_added</code> (info): <code>provider</code>, <code>model</code> — one per successful
+  new addition (an idempotent add of an already-present id logs nothing).</li>
+<li><code>provider_model_removed</code> (info): <code>provider</code>, <code>model</code>.</li>
+</ul>
+<h2>Error codes raised/handled</h2>
+<p><code>add_model</code> raises <code>InvalidModelError</code> (<code>INVALID_MODEL</code> 400) when the
+per-provider addition cap would be exceeded; <code>remove_model</code> raises
+<code>ModelNotRemovableError</code> (<code>MODEL_NOT_REMOVABLE</code> 400) for a config-file model
+and <code>ModelNotFoundError</code> (endpoint maps it to 404 <code>NOT_FOUND</code>) for an id in
+neither set. A failed write returns <code>None</code> (the failure is already logged)
+and the endpoints map it to 500 <code>WRITE_FAILED</code>. The endpoints also raise
+<code>InvalidProviderError</code> for a provider id absent from the config file.</p>
+<h2>Design decisions</h2>
+<p>Resolved from <code>add-summarization-model-management</code>:</p>
+<ul>
+<li><strong>D1</strong> — a separate writable overlay in the already-mounted, writable
+  transcript directory, not a writable <code>providers.json</code> (read-only mount,
+  holds secrets) nor an extended <code>settings.json</code> (blind whole-file
+  overwrite).</li>
+<li><strong>D2</strong> — effective config = file config plus overlay, with provenance
+  carried on <code>Provider.added_models</code>; the provider set comes only from the
+  file config.</li>
+<li><strong>D3</strong> — read-modify-write under a process lock with atomic <code>os.replace</code>,
+  mirroring <code>settings.save_settings</code>; per-call reads so edits need no
+  restart.</li>
+<li><strong>D5</strong> — validation and bounds live here: trimmed 1–200 char id, no
+  control characters, 50 additions per provider.</li>
+</ul>
+<h2>Cross-links</h2>
+<ul>
+<li><a href="providers.html"><code>providers.py</code></a> — the read-only file config this overlay merges over</li>
+<li><a href="model_discovery.html"><code>model_discovery.py</code></a> — live <code>/models</code> discovery the UI adds from</li>
+<li><a href="persist.html"><code>persist.py</code></a> — <code>transcript_dir()</code>, the path this module shares</li>
+<li><a href="library.html"><code>library.py</code></a> — the <code>.txt</code>-only listing that ignores <code>provider_overrides.json</code></li>
+<li><a href="main.html"><code>main.py</code></a> — the add/remove/discover endpoints that compose the merge</li>
+<li><a href="errors.html"><code>errors.py</code></a> — <code>INVALID_MODEL</code> / <code>MODEL_NOT_REMOVABLE</code></li>
+</ul>
+</main>
+</body>
+</html>

@@ -20,10 +20,13 @@ from pydantic import BaseModel
 from app import chain as chain_mod
 from app import log as applog
 from app import logbus
+from app import model_discovery as discovery_mod
 from app import summarize as summarize_mod
 from app.errors import (
     InputTooLongError,
+    InvalidModelError,
     InvalidProviderError,
+    ModelNotRemovableError,
     SummaryNotConfiguredError,
     TranscriptError,
 )
@@ -34,7 +37,15 @@ from app.library import (
 )
 from app.log import get_logger
 from app.persist import derive_file_name, save_transcript
-from app.providers import load_providers
+from app.provider_overrides import (
+    ModelNotFoundError,
+    add_model,
+    apply_overrides,
+    is_valid_model_id,
+    load_overrides,
+    remove_model,
+)
+from app.providers import ProviderConfig, load_providers
 from app.settings import load_settings, save_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -52,6 +63,14 @@ LOG_POLL_TIMEOUT = 0.5
 SUMMARIZE_MAX_CONCURRENCY = 2
 SUMMARIZE_EXECUTOR = ThreadPoolExecutor(
     max_workers=SUMMARIZE_MAX_CONCURRENCY, thread_name_prefix="summarize"
+)
+
+# Max concurrent model-discovery calls (design D6): a dedicated bounded pool
+# separate from SUMMARIZE_EXECUTOR — a 120 s summarize must not block a fast
+# /models call, and a hanging discovery must not starve summarization.
+DISCOVERY_MAX_CONCURRENCY = 2
+DISCOVERY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=DISCOVERY_MAX_CONCURRENCY, thread_name_prefix="discovery"
 )
 
 # Max request-body size in bytes (5 MiB). Checked against the declared
@@ -84,6 +103,18 @@ def _listen_port() -> int:
         return int(os.environ.get("PORT", DEFAULT_PORT))
     except ValueError:
         return DEFAULT_PORT
+
+
+def effective_config() -> ProviderConfig:
+    """The effective provider config: the file config merged with the
+    per-call overlay read (design D2).
+
+    Both reads run in a worker thread (blocking I/O off the event loop). The
+    merge is pure; a missing/malformed overlay degrades to the file-only
+    config, and the response is secret-free (keys and base URLs never leave
+    the server).
+    """
+    return apply_overrides(load_providers(), load_overrides())
 
 
 @asynccontextmanager
@@ -179,18 +210,154 @@ def create_app() -> FastAPI:
 
     @app.get("/api/providers")
     async def providers_endpoint():
-        # Read the config per request (design decision 3): edits take effect
-        # without a restart, a missing/malformed file degrades to "not
-        # configured". The response is secret-free: API keys and base URLs
-        # never leave the server (design decision 7).
-        config = await asyncio.to_thread(load_providers)
+        # Read the config and the overlay per request (design decision 3 /
+        # D2): edits take effect without a restart, a missing/malformed file
+        # degrades to "not configured". The effective list is the file
+        # config merged with the overlay (file models first, then
+        # non-duplicate overlay ids); ``addedModels`` carries the
+        # overlay-supplied subset so the UI can distinguish removable models.
+        # The response is secret-free: API keys and base URLs never leave
+        # the server (design decision 7).
+        config = await asyncio.to_thread(effective_config)
         return {
             "default": config.default,
             "providers": [
-                {"id": p.id, "name": p.name, "models": list(p.models)}
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "models": list(p.models),
+                    "addedModels": list(p.added_models),
+                }
                 for p in config.providers
             ],
         }
+
+    # The add/remove endpoints share one body rule (design D4/D5): the model
+    # id travels in a JSON body — model ids routinely contain "/" (e.g.
+    # "meta-llama/Llama-3"), which a {model} path segment would not carry
+    # safely — and must be a string field named "model".
+    async def _parse_model_body(request: Request) -> object:
+        try:
+            return await request.json()
+        except Exception:
+            return None
+
+    def _model_body_error(body: object) -> JSONResponse | None:
+        if not isinstance(body, dict) or not isinstance(body.get("model"), str):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": "INVALID_BODY",
+                                   "message": 'Expected a JSON object with a '
+                                              '"model" field.'}},
+            )
+        return None
+
+    def _error_response(code: str, message: str, status: int) -> JSONResponse:
+        return JSONResponse(
+            status_code=status,
+            content={"error": {"code": code, "message": message}},
+        )
+
+    @app.post("/api/providers/{provider_id}/models")
+    async def add_model_endpoint(provider_id: str, request: Request):
+        # The provider is validated against the *file* config: the overlay
+        # never introduces a provider (design D2). Rejection precedence:
+        # unknown provider, then body rules (design D5). The read-modify-
+        # write runs in a worker thread off the event loop, and the endpoint
+        # never touches the fetch chain or the single-flight semaphore, nor
+        # any summarization backend.
+        config = await asyncio.to_thread(load_providers)
+        provider = next(
+            (p for p in config.providers if p.id == provider_id), None
+        )
+        if provider is None:
+            error = InvalidProviderError()
+            return _error_response(error.code, error.message, error.status)
+        body = await _parse_model_body(request)
+        invalid_body = _model_body_error(body)
+        if invalid_body is not None:
+            return invalid_body
+        model_id = body["model"].strip()
+        if not is_valid_model_id(model_id):
+            error = InvalidModelError()
+            return _error_response(error.code, error.message, error.status)
+        try:
+            models = await asyncio.to_thread(add_model, provider, model_id)
+        except InvalidModelError as exc:  # the per-provider addition cap
+            return _error_response(exc.code, exc.message, exc.status)
+        if models is None:
+            # The overlay write failed; provider_overrides_save_failed is
+            # already logged and no partial state was left.
+            return _error_response(
+                "WRITE_FAILED",
+                "Could not save the provider overrides file.",
+                500,
+            )
+        return {"provider": provider.id, "model": model_id, "models": models}
+
+    @app.delete("/api/providers/{provider_id}/models")
+    async def remove_model_endpoint(provider_id: str, request: Request):
+        # Same body rule and file-config validation as the add endpoint.
+        # Only overlay-added ids are removable: a config-file model is 400
+        # MODEL_NOT_REMOVABLE, an id in neither set is 404 NOT_FOUND (plain
+        # HTTP, outside the taxonomy), a failed write is 500 WRITE_FAILED.
+        config = await asyncio.to_thread(load_providers)
+        provider = next(
+            (p for p in config.providers if p.id == provider_id), None
+        )
+        if provider is None:
+            error = InvalidProviderError()
+            return _error_response(error.code, error.message, error.status)
+        body = await _parse_model_body(request)
+        invalid_body = _model_body_error(body)
+        if invalid_body is not None:
+            return invalid_body
+        model_id = body["model"].strip()
+        try:
+            models = await asyncio.to_thread(remove_model, provider, model_id)
+        except ModelNotRemovableError as exc:
+            return _error_response(exc.code, exc.message, exc.status)
+        except ModelNotFoundError:
+            return _error_response(
+                "NOT_FOUND", "This model is not listed for that provider.", 404
+            )
+        if models is None:
+            return _error_response(
+                "WRITE_FAILED",
+                "Could not save the provider overrides file.",
+                500,
+            )
+        return {"provider": provider.id, "model": model_id, "models": models}
+
+    @app.get("/api/providers/{provider_id}/available-models")
+    async def available_models_endpoint(provider_id: str):
+        # Discover the provider's models live from its OpenAI-compatible
+        # /models (design D6). The provider is resolved against the *file*
+        # config first: the overlay never changes which base URL is
+        # contacted. The call runs on the dedicated bounded pool
+        # (DISCOVERY_EXECUTOR), off the event loop, and the endpoint never
+        # touches the fetch chain or the single-flight semaphore. The
+        # response is a bare ``models`` array of id strings — no base URL,
+        # no API key (design D6).
+        config = await asyncio.to_thread(load_providers)
+        provider = next(
+            (p for p in config.providers if p.id == provider_id), None
+        )
+        if provider is None:
+            error = InvalidProviderError()
+            return _error_response(error.code, error.message, error.status)
+        try:
+            models = await asyncio.get_running_loop().run_in_executor(
+                DISCOVERY_EXECUTOR,
+                contextvars.copy_context().run,
+                discovery_mod.list_models,
+                provider,
+            )
+        except TranscriptError as exc:
+            # ProviderError (PROVIDER_ERROR 502); the refresh-failure event
+            # is already logged by list_models.
+            return _error_response(exc.code, exc.message, exc.status)
+        return {"models": models}
 
     @app.get("/api/settings")
     async def settings_read_endpoint():
@@ -282,14 +449,17 @@ def create_app() -> FastAPI:
     async def summarize_endpoint(request: SummarizeRequest):
         # Validation order (design decision 8): cheap local checks precede
         # the expensive network call, every rejection path is backend-free,
-        # and when several rejections apply the first failing step wins.
+        # and when several rejections apply the first failing step wins. The
+        # provider/model pair is validated against the *effective* (merged)
+        # list, which is the same set the listing endpoint serves — an
+        # overlay-added model is immediately usable (design D2).
         if is_structurally_invalid_name(request.name):
             return JSONResponse(
                 status_code=400,
                 content={"error": {"code": "INVALID_NAME",
                                    "message": "Invalid transcript name."}},
             )
-        config = await asyncio.to_thread(load_providers)
+        config = await asyncio.to_thread(effective_config)
         if not config.providers:
             error = SummaryNotConfiguredError()
             return JSONResponse(

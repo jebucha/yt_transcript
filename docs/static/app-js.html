@@ -20,6 +20,8 @@
   <li><a href="../persist.html">app/persist.py</a></li>
   <li><a href="../library.html">app/library.py</a></li>
   <li><a href="../providers.html">app/providers.py</a></li>
+  <li><a href="../provider_overrides.html">app/provider_overrides.py</a></li>
+  <li><a href="../model_discovery.html">app/model_discovery.py</a></li>
   <li><a href="../summarize.html">app/summarize.py</a></li>
   <li><a href="../settings.html">app/settings.py</a></li>
   <li><a href="../log.html">app/log.py</a></li>
@@ -37,6 +39,7 @@
 <h2>Purpose</h2>
 <p>The entire frontend behavior, in one vanilla-JS IIFE with <code>"use strict"</code>:
 fetch flow and result display, copy/download, the saved-transcripts list,
+model management (the always-visible Summarization models section),
 summarization, and the live log viewer. No framework, no build step, no CDN
 — the file is served as-is at <code>/app.js</code> and references DOM ids defined in
 <code>index.html</code>.</p>
@@ -47,9 +50,12 @@ ids it requires from <code>index.html</code>: <code>url-input</code>, <code>fetc
 <code>transcript-panel</code>, <code>copy-btn</code>, <code>download-btn</code>, <code>saved-list</code>, <code>saved-empty</code>,
 <code>saved-count</code>, <code>saved-refresh-btn</code>, <code>provider-picker</code>, <code>summarize-btn</code>,
 <code>summarize-spinner</code>, <code>summary-panel</code>, <code>summary-text</code>, <code>summary-copy-btn</code>,
-<code>auto-summarize</code>, <code>auto-summarize-note</code>, <code>log-panel</code>, <code>logs-toggle</code>. It
+<code>auto-summarize</code>, <code>auto-summarize-note</code>, <code>model-management-list</code>,
+<code>model-management-empty</code>, <code>log-panel</code>, <code>logs-toggle</code>. It
 also defines the <code>ERROR_MESSAGES</code> map (server error code → human message)
-for the nine taxonomy codes.</p>
+for the thirteen taxonomy codes, plus a discovery-scoped <code>PROVIDER_ERROR</code>
+override (<code>DISCOVERY_ERROR_MESSAGES</code>) so a failed "Refresh from backend"
+reads as a failed model refresh, not a failed summary.</p>
 <h2>Invariants</h2>
 <ul>
 <li><strong>No-<code>innerHTML</code> rule — absolute.</strong> Every fetched string (transcript,
@@ -94,10 +100,33 @@ for the nine taxonomy codes.</p>
   fails. It is interactive only when providers are configured and is
   disabled while any summarize is in flight.</li>
 <li><strong>No polling.</strong> The saved list, the provider list, and the settings load
-  once on page load, the list also reloads after each successful fetch and
-  via its Refresh button. The provider list is never re-fetched (a stale
-  picker after a config edit gets a clean 400 <code>INVALID_PROVIDER</code> telling
-  the user to reload).</li>
+  once on page load, the saved list also reloads after each successful fetch
+  and via its Refresh button. The provider list is re-fetched only after a
+  successful model add or removal (design D8); a stale picker after a
+  config edit otherwise gets a clean 400 <code>INVALID_PROVIDER</code> telling the
+  user to reload.</li>
+<li><strong>Model management is display-side only, like the picker.</strong> The section
+  never sees base URLs or keys — rows are built from <code>GET /api/providers</code>
+  (<code>id</code>, display name, <code>models</code>, <code>addedModels</code>) via <code>textContent</code>/
+  <code>createElement</code> only, and provider/model ids are opaque text (markup-like
+  ids render as text, never as HTML). Manual add, discovery ("Refresh from
+  backend"), and remove each hit their endpoint and then reload the
+  provider list.</li>
+<li><strong>Re-renders never collapse the UI.</strong> The per-provider manage panels the
+  user has open (<code>openPanels</code>) and the last successful discovery result per
+  provider (<code>discoveredModels</code>) survive every section re-render, so adding,
+  removing, or re-discovering keeps panels open and the discovered list
+  visible with its Add/Added buttons recomputed against the new effective
+  list.</li>
+<li><strong>Picker selection rules after model changes (design D8).</strong> After a
+  successful add the picker selects the added pair; after a successful
+  removal it keeps the current selection unless that was the removed pair,
+  in which case it falls back to the default option. No last-selection
+  persistence: a page reload re-applies the default rule.</li>
+<li><strong>Discovery never alters models.</strong> A failed refresh shows the
+  discovery-specific <code>PROVIDER_ERROR</code> message in the error banner, keeps
+  any previous discovered list, and leaves the effective model list
+  untouched; a successful refresh clears the banner.</li>
 <li><strong>Copy works over plain HTTP.</strong> <code>navigator.clipboard.writeText</code> first,
   falling back to a hidden-textarea <code>execCommand("copy")</code> — the Clipboard
   API does not exist in non-secure contexts, and plain HTTP is the normal
@@ -118,13 +147,20 @@ for the nine taxonomy codes.</p>
 (<code>server_started</code>, <code>server_stopped</code>, <code>http_request</code>, <code>fetch_attempt</code>,
 <code>fetch_rejected</code>, <code>transcript_saved</code>, <code>transcript_save_failed</code>,
 <code>summary_completed</code>, <code>summary_failed</code>, <code>summary_save_failed</code>,
-<code>config_load_failed</code>, <code>unhandled_exception</code>), with a
+<code>config_load_failed</code>, <code>provider_model_added</code>, <code>provider_model_removed</code>,
+<code>provider_models_refreshed</code>, <code>provider_models_refresh_failed</code>,
+<code>provider_overrides_load_failed</code>, <code>provider_overrides_save_failed</code>,
+<code>unhandled_exception</code>), with a
 <code>time  LEVEL  event  key=value …</code> fallback for unknown ones.</p>
 <h2>Error codes handled</h2>
 <p><code>INVALID_URL</code>, <code>VIDEO_UNAVAILABLE</code>, <code>NO_CAPTIONS</code>, <code>UPSTREAM_FAILURE</code>,
 <code>BUSY</code>, <code>NOT_CONFIGURED</code>, <code>INVALID_PROVIDER</code>, <code>PROVIDER_ERROR</code>,
-<code>INPUT_TOO_LONG</code> — via the <code>ERROR_MESSAGES</code> map (preferred over the server
-message); network failures and unexpected shapes get a generic message.</p>
+<code>INPUT_TOO_LONG</code>, <code>INVALID_MODEL</code>, <code>MODEL_NOT_REMOVABLE</code>, <code>NOT_FOUND</code>,
+<code>WRITE_FAILED</code> — via the <code>ERROR_MESSAGES</code> map (preferred over the server
+message); network failures and unexpected shapes get a generic message.
+Discovery failures additionally pass the <code>DISCOVERY_ERROR_MESSAGES</code>
+override, so <code>PROVIDER_ERROR</code> from "Refresh from backend" gets the
+discovery-specific wording.</p>
 <h2>Design decisions</h2>
 <p>Resolved from the archived change design docs:</p>
 <ul>
@@ -147,12 +183,21 @@ message); network failures and unexpected shapes get a generic message.</p>
   saved-summary read), <strong>D6</strong> (subdued note for auto failures, checkbox
   revert on a failed settings write), <strong>D7</strong> (accepted: a second auto-fire
   during an in-flight summarize is dropped).</li>
+<li><code>add-summarization-model-management</code> <strong>D7</strong> (the always-visible section:
+  per-provider rows with count and manage panel — manual add form,
+  discovery with Add buttons, added models with Remove, file models
+  without; all <code>textContent</code>), <strong>D8</strong> (the picker's preferred-selection
+  rule on <code>loadProviders(preferred)</code> after add/remove).</li>
 </ul>
 <h2>Cross-links</h2>
 <ul>
 <li><a href="index-html.html"><code>index.html</code></a> — the DOM it wires up</li>
 <li><a href="style-css.html"><code>style.css</code></a> — the classes it toggles</li>
 <li><a href="../main.html"><code>main.html</code></a> — the endpoints it consumes</li>
+<li><a href="../provider_overrides.html"><code>provider_overrides.html</code></a> — the overlay
+  behind the add/remove endpoints</li>
+<li><a href="../model_discovery.html"><code>model_discovery.html</code></a> — the discovery behind
+  the "Refresh from backend" endpoint</li>
 </ul>
 </main>
 </body>

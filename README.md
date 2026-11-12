@@ -23,7 +23,8 @@ third-party transcript service.
   `NO_CAPTIONS` 404, `UPSTREAM_FAILURE` 502, `BUSY` 503; the saved-transcript
   read endpoints add `INVALID_NAME` 400 and `NOT_FOUND` 404; summarization
   adds `NOT_CONFIGURED` 503, `INVALID_PROVIDER` 400, `PROVIDER_ERROR` 502,
-  and `INPUT_TOO_LONG` 400.
+  `INPUT_TOO_LONG` 400, and the model-management endpoints add
+  `INVALID_MODEL` 400 and `MODEL_NOT_REMOVABLE` 400.
 - **Concurrency:** at most one YouTube fetch chain at a time; a second
   concurrent request gets `503 BUSY` immediately.
 
@@ -219,6 +220,26 @@ Every summarization is logged as `summary_completed` / `summary_failed`
 (structured logs and the in-browser log panel); a malformed config file
 logs `config_load_failed` and degrades to "not configured".
 
+**Managing models from the UI.** The always-visible **Summarization models**
+section lists every configured provider with its model count and a **Manage**
+panel: add a model id by hand, refresh the list from the provider's own
+`GET {baseURL}/models` endpoint (each discovered model gets its own **Add**),
+and remove a model you added. The config file itself is read-only and
+operator-owned, so UI-added model ids are stored in a separate writable file,
+`provider_overrides.json`, in the transcripts directory
+(`{"<providerId>": ["model-id", ...]}`); the effective list is the
+config-file models followed by the non-duplicate overlay ids, and an added
+model is selectable and usable immediately — no restart, no config edit.
+Only UI-added models can be removed; config-file models are immutable from
+the UI. A missing or malformed overlay file is treated as "no additions".
+Model ids are bounded (trimmed, 1–200 characters, no control characters, at
+most 50 additions per provider). The boundary is unchanged: the UI can only
+address operator-configured base URLs with different model strings — it can
+never add a provider, base URL, or API key, and keys and base URLs still
+never reach the browser. Like the settings toggle, the write endpoints are
+unauthenticated (trusted to anyone who can reach the port), which is the
+same trust level as `POST /api/settings`.
+
 **Auto-summarize.** The Auto-summarize checkbox beside the provider picker
 enables hands-free summarizing: after a successful *fresh fetch* whose
 transcript has no saved summary, the app immediately sends it to the
@@ -241,6 +262,10 @@ HTTP error, sent a malformed response, or returned empty content (a thinking
 model can spend its whole output budget reasoning and produce nothing); please
 try again.
 `INPUT_TOO_LONG` 400 — the transcript exceeds the 100,000-character cap.
+`INVALID_MODEL` 400 — a model id failed the add rules (blank, over 200
+characters, or containing control characters) or the provider already holds
+the 50-model addition cap. `MODEL_NOT_REMOVABLE` 400 — the remove was for a
+model that came from the config file (only UI-added models can be removed).
 
 **A note on keys.** If a `baseURL` is not `localhost`/loopback and the
 provider carries an `apiKey`, use `https://` so the key does not cross the

@@ -331,6 +331,169 @@ h1 {
   font-size: 0.95rem;
 }
 
+/* --- Summarization models section --------------------------------------------- */
+
+.model-management-section { margin-top: 24px; }
+
+.model-management-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.model-management-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.model-provider { border-bottom: 1px solid var(--border); }
+.model-provider:last-child { border-bottom: none; }
+
+.model-provider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.model-provider-row:hover { background: var(--bg); }
+.model-provider-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.model-provider-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.model-provider-count {
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.model-provider-manage {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.model-panel {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-panel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-panel-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.model-add-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.model-add-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Discovered lists can hold up to 200 rows; keep the panel bounded. */
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.model-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-list-item:last-child { border-bottom: none; }
+
+.model-list-id {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+}
+
+.model-item-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.model-item-btn-remove {
+  background: transparent;
+  color: var(--error-text);
+  border: 1px solid var(--error-border);
+}
+
+.model-item-btn-remove:hover:not(:disabled) {
+  background: var(--error-bg);
+}
+
+.model-panel-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.model-management-empty {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 /* --- Log viewer ---------------------------------------------------------------- */
 
 .log-panel {

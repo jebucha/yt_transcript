@@ -26,6 +26,8 @@
   var summaryPanel = document.getElementById("summary-panel");
   var summaryTextEl = document.getElementById("summary-text");
   var summaryCopyBtn = document.getElementById("summary-copy-btn");
+  var modelManagementList = document.getElementById("model-management-list");
+  var modelManagementEmpty = document.getElementById("model-management-empty");
 
   var ERROR_MESSAGES = {
     INVALID_URL:
@@ -45,7 +47,16 @@
     PROVIDER_ERROR:
       "The summarization backend failed — it may be down or overloaded. Please try again.",
     INPUT_TOO_LONG:
-      "This transcript is too long to summarize (over 100,000 characters)."
+      "This transcript is too long to summarize (over 100,000 characters).",
+    INVALID_MODEL:
+      "That model id can't be added — it must be 1–200 characters with no control characters, and each provider holds at most 50 added models.",
+    MODEL_NOT_REMOVABLE:
+      "That model comes from the provider config file, so it can't be removed from the UI.",
+    NOT_FOUND:
+      "That model isn't among this provider's added models, so it can't be removed.",
+    WRITE_FAILED:
+      "Couldn't save the model list — the server's transcript directory is " +
+      "not writable. Please check the server's storage."
   };
 
   var currentTranscript = "";
@@ -71,6 +82,17 @@
   // The autoSummarize setting as last known to be persisted server-side:
   // the revert target when a POST /api/settings write fails (design D6).
   var persistedAutoSummarize = false;
+  // Model-management UI state (design D7/D8): which manage panels the user
+  // has open (a re-render must not collapse them), and the last successful
+  // discovery result per provider (so a section re-render doesn't lose it).
+  var openPanels = {};
+  var discoveredModels = {};
+  // A failed "Refresh from backend" must not read as a failed summary.
+  var DISCOVERY_ERROR_MESSAGES = {
+    PROVIDER_ERROR:
+      "Couldn't fetch the model list from that backend — it may be down or " +
+      "not expose a models endpoint. You can still add a model manually."
+  };
 
   function setBusy(busy) {
     fetchBtn.disabled = busy;
@@ -87,7 +109,11 @@
     errorBanner.hidden = true;
   }
 
-  function messageFor(code, serverMessage) {
+  // ``overrides`` (optional) maps error codes to call-site-specific messages
+  // that take precedence over ERROR_MESSAGES — used by model discovery,
+  // where a PROVIDER_ERROR is a failed refresh, not a failed summary.
+  function messageFor(code, serverMessage, overrides) {
+    if (code && overrides && overrides[code]) return overrides[code];
     if (code && ERROR_MESSAGES[code]) return ERROR_MESSAGES[code];
     if (serverMessage) return serverMessage;
     return "Something went wrong. Please try again.";
@@ -362,6 +388,344 @@
     downloadTranscript();
   });
 
+  // --- model management -----------------------------------------------------------
+  // Always-visible section listing each configured provider with its
+  // effective model count and a manage panel (design D7): a manual model-id
+  // add, a backend discovery whose results carry Add buttons, and the
+  // UI-added models with Remove buttons (config-file models never get a
+  // Remove). After a successful add or remove the provider list is reloaded
+  // and the picker re-rendered (design D8). Every fetched string enters the
+  // DOM via textContent only; provider ids and model ids are opaque text.
+
+  function modelCountLabel(count) {
+    return count === 1 ? "1 model" : count + " models";
+  }
+
+  function renderModelManagement() {
+    // Rebuild the section from the current provider list. Open panels
+    // (openPanels) and cached discovery results (discoveredModels) survive
+    // the re-render, so add/remove/discovery never collapse the UI.
+    modelManagementList.textContent = "";
+    if (!providers.length) {
+      modelManagementList.hidden = true;
+      modelManagementEmpty.hidden = false;
+      return;
+    }
+    modelManagementList.hidden = false;
+    modelManagementEmpty.hidden = true;
+    for (var i = 0; i < providers.length; i++) {
+      modelManagementList.appendChild(buildProviderItem(providers[i]));
+    }
+  }
+
+  function buildProviderItem(provider) {
+    var item = document.createElement("li");
+    item.className = "model-provider";
+
+    var row = document.createElement("button");
+    row.type = "button";
+    row.className = "model-provider-row";
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "model-provider-name";
+    nameSpan.textContent = provider.name;
+    var countSpan = document.createElement("span");
+    countSpan.className = "model-provider-count";
+    countSpan.textContent = modelCountLabel(provider.models.length);
+    var manageSpan = document.createElement("span");
+    manageSpan.className = "model-provider-manage";
+    manageSpan.textContent = "Manage";
+    row.appendChild(nameSpan);
+    row.appendChild(countSpan);
+    row.appendChild(manageSpan);
+
+    var panel = buildProviderPanel(provider);
+    var open = !!openPanels[provider.id];
+    panel.hidden = !open;
+    row.setAttribute("aria-expanded", open ? "true" : "false");
+    row.setAttribute("aria-controls", panel.id);
+    row.addEventListener("click", function () {
+      openPanels[provider.id] = !openPanels[provider.id];
+      panel.hidden = !openPanels[provider.id];
+      row.setAttribute("aria-expanded", openPanels[provider.id] ? "true" : "false");
+    });
+
+    item.appendChild(row);
+    item.appendChild(panel);
+    return item;
+  }
+
+  // One panel per provider: manual add, discovery, the UI-added models
+  // (removable), and the config-file models (never removable from the UI).
+  function buildProviderPanel(provider) {
+    var panel = document.createElement("div");
+    panel.className = "model-panel";
+    panel.id = "model-panel-" + provider.id;
+    panel.hidden = true;
+
+    var added = provider.addedModels || [];
+    var fileModels = [];
+    for (var i = 0; i < provider.models.length; i++) {
+      if (added.indexOf(provider.models[i]) === -1) {
+        fileModels.push(provider.models[i]);
+      }
+    }
+
+    // Manual add (form submit).
+    var manualGroup = document.createElement("div");
+    manualGroup.className = "model-panel-group";
+    var manualLabel = document.createElement("span");
+    manualLabel.className = "model-panel-label";
+    manualLabel.textContent = "Add a model";
+    var addForm = document.createElement("form");
+    addForm.className = "model-add-form";
+    var addInput = document.createElement("input");
+    addInput.className = "model-add-input";
+    addInput.type = "text";
+    addInput.maxLength = 200;
+    addInput.placeholder = "model id";
+    addInput.autocomplete = "off";
+    addInput.spellcheck = false;
+    addInput.setAttribute("aria-label", "Model id to add for " + provider.name);
+    var addBtn = document.createElement("button");
+    addBtn.type = "submit";
+    addBtn.className = "btn";
+    addBtn.textContent = "Add";
+    addForm.appendChild(addInput);
+    addForm.appendChild(addBtn);
+    manualGroup.appendChild(manualLabel);
+    manualGroup.appendChild(addForm);
+    panel.appendChild(manualGroup);
+
+    addForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var modelId = addInput.value.trim();
+      if (!modelId) return; // no request, no error (same rule as the URL input)
+      doAddModel(provider.id, modelId, addInput);
+    });
+
+    // Discovery: a button plus the last successful result, each row with an
+    // Add button (a disabled "Added" when the id is already effective).
+    var discoverGroup = document.createElement("div");
+    discoverGroup.className = "model-panel-group";
+    var discoverLabel = document.createElement("span");
+    discoverLabel.className = "model-panel-label";
+    discoverLabel.textContent = "Backend models";
+    var discoverBtn = document.createElement("button");
+    discoverBtn.type = "button";
+    discoverBtn.className = "btn btn-quiet model-item-btn model-discover-btn";
+    discoverBtn.textContent = "Refresh from backend";
+    var discoveredList = document.createElement("ul");
+    discoveredList.className = "model-list model-discovered-list";
+    discoveredList.hidden = true;
+    discoverGroup.appendChild(discoverLabel);
+    discoverGroup.appendChild(discoverBtn);
+    discoverGroup.appendChild(discoveredList);
+    panel.appendChild(discoverGroup);
+
+    discoverBtn.addEventListener("click", function () {
+      doDiscoverModels(provider, discoverBtn, discoveredList);
+    });
+    discoveredList.addEventListener("click", function (event) {
+      var btn = event.target.closest("button");
+      if (!btn || btn.disabled) return;
+      var modelRow = btn.closest(".model-list-item");
+      doAddModel(provider.id, modelRow.dataset.model);
+    });
+    renderDiscoveredList(discoveredList, provider);
+
+    // UI-added models, each with a Remove button.
+    var addedGroup = document.createElement("div");
+    addedGroup.className = "model-panel-group";
+    var addedLabel = document.createElement("span");
+    addedLabel.className = "model-panel-label";
+    addedLabel.textContent = "Added by you";
+    var addedList = document.createElement("ul");
+    addedList.className = "model-list model-added-list";
+    var addedNote = document.createElement("p");
+    addedNote.className = "model-panel-note";
+    addedNote.textContent = "No models added yet.";
+    addedNote.hidden = added.length > 0;
+    addedGroup.appendChild(addedLabel);
+    addedGroup.appendChild(addedList);
+    addedGroup.appendChild(addedNote);
+    panel.appendChild(addedGroup);
+
+    addedList.addEventListener("click", function (event) {
+      var btn = event.target.closest("button");
+      if (!btn) return;
+      var modelRow = btn.closest(".model-list-item");
+      doRemoveModel(provider.id, modelRow.dataset.model);
+    });
+    for (var a = 0; a < added.length; a++) {
+      addedList.appendChild(
+        buildModelListRow(added[a], "Remove", "model-item-btn-remove")
+      );
+    }
+
+    // Config-file models: shown without any Remove action.
+    var fileGroup = document.createElement("div");
+    fileGroup.className = "model-panel-group";
+    var fileLabel = document.createElement("span");
+    fileLabel.className = "model-panel-label";
+    fileLabel.textContent = "From config file";
+    var fileList = document.createElement("ul");
+    fileList.className = "model-list model-file-list";
+    fileGroup.appendChild(fileLabel);
+    fileGroup.appendChild(fileList);
+    panel.appendChild(fileGroup);
+
+    for (var f = 0; f < fileModels.length; f++) {
+      fileList.appendChild(buildModelListRow(fileModels[f], null, null));
+    }
+
+    return panel;
+  }
+
+  // A list row: the model id as plain text plus an optional action button.
+  // The id rides in dataset.model, which the delegated list handlers read
+  // from the clicked row — no closure captures a loop variable.
+  function buildModelListRow(modelId, actionLabel, actionClass) {
+    var row = document.createElement("li");
+    row.className = "model-list-item";
+    row.dataset.model = modelId;
+    var idSpan = document.createElement("span");
+    idSpan.className = "model-list-id";
+    idSpan.textContent = modelId;
+    row.appendChild(idSpan);
+    if (actionLabel) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn model-item-btn" + (actionClass ? " " + actionClass : "");
+      btn.textContent = actionLabel;
+      row.appendChild(btn);
+    }
+    return row;
+  }
+
+  function renderDiscoveredList(listEl, provider) {
+    // Rebuild this provider's cached discovery result; ids already in the
+    // effective list get a disabled "Added" button instead of Add.
+    listEl.textContent = "";
+    var ids = discoveredModels[provider.id];
+    if (!ids || !ids.length) {
+      listEl.hidden = true;
+      return;
+    }
+    for (var i = 0; i < ids.length; i++) {
+      var present = provider.models.indexOf(ids[i]) !== -1;
+      var row = buildModelListRow(ids[i], present ? "Added" : "Add", null);
+      if (present) row.querySelector("button").disabled = true;
+      listEl.appendChild(row);
+    }
+    listEl.hidden = false;
+  }
+
+  async function doAddModel(providerId, modelId, inputEl) {
+    clearError();
+    var res;
+    try {
+      res = await fetch("/api/providers/" + encodeURIComponent(providerId) + "/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelId })
+      });
+    } catch (_) {
+      showError("Network error — could not reach the server. Please try again.");
+      return;
+    }
+    var data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = null;
+    }
+    if (!res.ok) {
+      showError(
+        messageFor(
+          data && data.error ? data.error.code : null,
+          data && data.error ? data.error.message : null
+        )
+      );
+      return;
+    }
+    if (inputEl) inputEl.value = ""; // a persisted add clears the manual input
+    // Success: reload the list and select the new pair (design D8).
+    await loadProviders({ provider: providerId, model: modelId });
+  }
+
+  async function doRemoveModel(providerId, modelId) {
+    clearError();
+    var previous = providerOptions[providerPicker.selectedIndex] || null;
+    var res;
+    try {
+      res = await fetch("/api/providers/" + encodeURIComponent(providerId) + "/models", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelId })
+      });
+    } catch (_) {
+      showError("Network error — could not reach the server. Please try again.");
+      return;
+    }
+    var data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = null;
+    }
+    if (!res.ok) {
+      showError(
+        messageFor(
+          data && data.error ? data.error.code : null,
+          data && data.error ? data.error.message : null
+        )
+      );
+      return;
+    }
+    // Success: if the removal dropped the picker's current selection, fall
+    // back to the default option; otherwise the selection is kept (design D8).
+    var preferred = undefined;
+    if (previous && previous.provider === providerId && previous.model === modelId) {
+      preferred = null;
+    }
+    await loadProviders(preferred);
+  }
+
+  // Discovery never changes the effective model list; on failure it only
+  // shows the discovery-specific message and leaves any previous result.
+  async function doDiscoverModels(provider, discoverBtn, listEl) {
+    discoverBtn.disabled = true;
+    try {
+      var res = await fetch(
+        "/api/providers/" + encodeURIComponent(provider.id) + "/available-models"
+      );
+      var data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        data = null;
+      }
+      if (!res.ok) {
+        showError(
+          messageFor(
+            data && data.error ? data.error.code : null,
+            data && data.error ? data.error.message : null,
+            DISCOVERY_ERROR_MESSAGES
+          )
+        );
+        return;
+      }
+      discoveredModels[provider.id] =
+        data && Array.isArray(data.models) ? data.models : [];
+      renderDiscoveredList(listEl, provider);
+      clearError(); // a successful refresh clears any stale error
+    } catch (_) {
+      showError("Network error — could not reach the server. Please try again.");
+    } finally {
+      discoverBtn.disabled = false;
+    }
+  }
+
   // --- summarization --------------------------------------------------------------
   // The provider list is loaded once on page load (no polling, same
   // convention as the saved list). The picker offers one option per
@@ -384,7 +748,16 @@
     return providerOptions.length ? providerOptions[defaultOptionIndex()] : null;
   }
 
-  function renderProviderPicker() {
+  // Selection rule (design D8): ``preferred === undefined`` keeps the
+  // picker's current selection when the same provider/model pair is still
+  // offered; ``preferred === null`` selects the default option; a
+  // ``preferred`` object selects that pair (falling back to the default
+  // when it is no longer offered).
+  function renderProviderPicker(preferred) {
+    var previous = null;
+    if (preferred === undefined) {
+      previous = providerOptions[providerPicker.selectedIndex] || null;
+    }
     providerPicker.textContent = "";
     providerOptions = [];
     for (var i = 0; i < providers.length; i++) {
@@ -396,12 +769,24 @@
         providerPicker.appendChild(option);
       }
     }
-    // Pre-select the default provider's first model; without a usable
-    // default, the first option.
-    providerPicker.selectedIndex = defaultOptionIndex();
+    var index = defaultOptionIndex();
+    var wanted = preferred === undefined ? previous : preferred;
+    if (wanted) {
+      for (var k = 0; k < providerOptions.length; k++) {
+        if (providerOptions[k].provider === wanted.provider &&
+          providerOptions[k].model === wanted.model) {
+          index = k;
+          break;
+        }
+      }
+    }
+    providerPicker.selectedIndex = index;
   }
 
-  async function loadProviders() {
+  // Loads the provider list, re-renders the picker (with the optional
+  // preferred selection) and the model-management section. Called on page
+  // load and after every successful model add/remove (design D8).
+  async function loadProviders(preferred) {
     try {
       var res = await fetch("/api/providers");
       if (!res.ok) return; // keep the not-configured state
@@ -412,7 +797,8 @@
       providers = [];
       defaultProviderId = null;
     }
-    renderProviderPicker();
+    renderProviderPicker(preferred);
+    renderModelManagement();
     updateSummarizeEnabled();
   }
 
@@ -725,6 +1111,36 @@
     },
     config_load_failed: function (e) {
       var line = "provider config load failed: " + e.path +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    provider_model_added: function (e) {
+      return "model added: " + e.provider + "/" + e.model;
+    },
+    provider_model_removed: function (e) {
+      return "model removed: " + e.provider + "/" + e.model;
+    },
+    provider_models_refreshed: function (e) {
+      return (
+        "models refreshed: " + e.provider +
+        " (" + e.count + " models, " + e.duration_ms + " ms)"
+      );
+    },
+    provider_models_refresh_failed: function (e) {
+      var line = "models refresh failed: " + e.provider +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    provider_overrides_load_failed: function (e) {
+      var line = "provider overrides load failed: " + e.path +
+                 " [" + e.reason + "]";
+      if (e.detail) line += " " + e.detail;
+      return line;
+    },
+    provider_overrides_save_failed: function (e) {
+      var line = "provider overrides save failed: " + e.path +
                  " [" + e.reason + "]";
       if (e.detail) line += " " + e.detail;
       return line;
